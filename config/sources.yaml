@@ -1,0 +1,26 @@
+market_breadth:
+  primary_url: https://r2.deanfi.com/advance-decline/daily_breadth.json
+  fallback_url: https://raw.githubusercontent.com/GibsonNeo/deanfi-data/main/advance-decline/daily_breadth.json
+  cache_path: data/breadth/daily_breadth.json
+  refresh_minutes: 15
+
+mean_reversion:
+  refresh_minutes: 10
+  datasets:
+    ma_spreads:
+      primary_url: https://r2.deanfi.com/meanreversion/ma_spreads_snapshot.json
+      fallback_url: https://raw.githubusercontent.com/GibsonNeo/deanfi-data/main/meanreversion/ma_spreads_snapshot.json
+      cache_path: data/meanreversion/ma_spreads_snapshot.json
+    price_vs_ma:
+      primary_url: https://r2.deanfi.com/meanreversion/price_vs_ma_snapshot.json
+      fallback_url: https://raw.githubusercontent.com/GibsonNeo/deanfi-data/main/meanreversion/price_vs_ma_snapshot.json
+      cache_path: data/meanreversion/price_vs_ma_snapshot.json
+  historical:
+    ma_spreads: meanreversion/ma_spreads_historical.json
+    price_vs_ma: meanreversion/price_vs_ma_historical.json
+
+support_resistance:
+  primary_url: https://r2.deanfi.com/supportresistence/support_resistence.json
+  fallback_url: https://raw.githubusercontent.com/GibsonNeo/deanfi-data/main/supportresistence/support_resistence.json
+  cache_path: data/supportresistence/support_resistence.json
+  refresh_minutes: 1440
