@@ -303,6 +303,59 @@ Optional tighten: require `ma_stack` within 2 weeks of break. Optional loosen: `
 
 ---
 
+### NYSE universe (common equity scan)
+
+**Requirement:** Weekly scan universe should be **common equity only** — no ETFs, exchange-traded debt (baby bonds), preferreds, warrants, units, or rights. ADRs of ordinary/common shares are **included** (e.g. BABA, BHP).
+
+**Source:** Nasdaq Trader `otherlisted.txt` (NYSE exchange code `N`), filtered by `src/build_universe.py` → `data/universe/nyse.json`.
+
+**Excluded by name/symbol rules:**
+
+| Category | How detected | Examples |
+|----------|--------------|----------|
+| ETFs / test issues | `ETF` flag, `TEST` flag, name contains `ETF` / `ETN` / `FUND` | — |
+| Exchange-traded debt | `%` coupon + `Notes` / `Debenture` / `Subordinated`, or `Notes due` | HCXY (Hercules 6.25% Notes 2033), SAJ |
+| Preferred | `Preferred`, `Pfd`, `PREF.`, `PFD.` in name | BNS (Scotia Pfd series) |
+| Warrants / units / rights | Name contains `Warrant`, `Unit`, `Right` | — |
+| Structured receipts | `Depositary Shares of` (debt/preferred), `Receipt` | — |
+
+**Not excluded:** ADRs (`American Depositary Shares` representing common stock), REIT common shares, dual-class common (symbol quirks like `BRK.B` may still fail on Yahoo).
+
+**Commands:**
+
+```bash
+python src/build_universe.py                    # NYSE → nyse.json
+python src/build_universe.py --exchange NASDAQ  # Nasdaq → nasdaq.json
+python src/weekly_scan.py                       # full scan (~20 min NYSE)
+python src/weekly_scan.py --universe data/universe/nasdaq.json
+python src/weekly_scan.py --enrich-volume data/scans/YYYY-MM-DD_nasdaq.json
+python src/weekly_scan.py --refilter data/scans/YYYY-MM-DD.json   # re-apply hit rules + universe filter without re-fetching
+```
+
+**Hit file filters** (`*_hits.json`): `close > MA10 > MA20` plus `combined_signal`, `early_turn`, or `first_break`. Re-filter after logic or universe changes — no need to re-run yfinance unless the week rolled.
+
+---
+
+### Liquidity (50-day average volume)
+
+**Requirement:** Screen only names with enough daily liquidity — **50-day average volume > 300,000 shares**.
+
+**Source:** yfinance daily bars (`period=4mo`, mean of last 50 trading sessions) → field `avg_volume_50d` on each scan row.
+
+**Config:** `config/sources.yaml` → `liquidity.min_avg_volume_50d: 300000`
+
+**Hit rule:** Rows missing volume data or below threshold are excluded from `*_hits.json` (full scan JSON keeps all rows with volume annotated).
+
+**Commands:**
+
+```bash
+python src/weekly_scan.py --enrich-volume data/scans/2026-06-21_nasdaq.json   # backfill volume + re-filter hits
+```
+
+New full scans fetch volume per symbol automatically.
+
+---
+
 ## Storage layers (project convention)
 
 | Layer | Location | Stores | Example |
@@ -310,7 +363,7 @@ Optional tighten: require `ma_stack` within 2 weeks of break. Optional loosen: `
 | **Decisions & research** | `checklist.md` (this file) | Which source, why, field mapping | DeanFi chosen for SPX A/D |
 | **Agent workflow** | `SKILL.md` | How to explore items — not project-specific data | Per-item report template |
 | **Runtime config** | `config/sources.yaml` (when code exists) | URLs, refresh interval, cache path | `breadth.url`, `refresh_minutes: 15` |
-| **Live / cached data** | `data/breadth/`, `data/meanreversion/`, `data/correlation/`, `data/trends/weekly/`, `data/breakouts/multi_top/` | Fetched JSON snapshots | `daily_breadth.json`, `cor1m.json`, weekly state, multi-top eval per symbol |
-| **Application code** | `src/` fetcher modules | Fetch, validate, expose metrics | `market_breadth.py`, `mean_reversion.py`, `implied_correlation.py`, `weekly_trend_state.py` (planned), `multi_top_breakout.py` (planned), `trend_analysis.py` |
+| **Live / cached data** | `data/breadth/`, `data/meanreversion/`, `data/correlation/`, `data/trends/weekly/`, `data/breakouts/multi_top/`, `data/universe/`, `data/scans/` | Fetched JSON snapshots | `daily_breadth.json`, `cor1m.json`, `nyse.json`, `YYYY-MM-DD_hits.json` |
+| **Application code** | `src/` fetcher modules | Fetch, validate, expose metrics | `build_universe.py`, `weekly_scan.py`, `weekly_trend_state.py`, `multi_top_breakout.py`, `market_breadth.py`, `mean_reversion.py`, `implied_correlation.py`, `trend_analysis.py` |
 
 Do **not** store daily metric values (e.g. today's `advances: 394`) in checklist or skill files — those belong in `data/` or a database once the fetcher runs.

@@ -69,6 +69,13 @@ Summarize in chat:
 - Shared dependencies to install once
 - Recommended build order (data layer first, then indicators, then screening logic)
 
+## Universe & scan conventions
+
+- NYSE weekly scan universe is **common equity only** — see **NYSE universe (common equity scan)** in [checklist.md](checklist.md). Refresh with `python src/build_universe.py` before full scans.
+- After changing hit logic or universe filters, use `python src/weekly_scan.py --refilter data/scans/YYYY-MM-DD.json` instead of re-fetching all symbols.
+- **Liquidity:** hits require `avg_volume_50d > 300,000` (see checklist). Backfill with `--enrich-volume` on an existing scan JSON.
+- Do not store scan hit counts or symbol lists in this skill file — those live in `data/scans/`.
+
 ## Rules
 
 - Do not skip research and assume an item must be built — search first.

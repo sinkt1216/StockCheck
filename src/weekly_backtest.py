@@ -69,9 +69,11 @@ def _slope_event(row: pd.Series) -> str:
 
 
 def _combined_signal(row: pd.Series) -> str | None:
+    """Assign combined_signal — priority: watch → break → confirmed → extended."""
     stage = row.get("mt_stage")
     slope = row.get("wt_slope_4w_pct")
-    if stage == "WATCH":
+    delta = row.get("wt_slope_4w_delta")
+    if stage == "WATCH" and slope is not None and slope > 0 and delta is not None and delta > 0:
         return "watch"
     if row.get("breakout") and (
         row.get("wt_early_turn") or (slope is not None and slope > SLOPE_TURN)
