@@ -88,6 +88,48 @@ Track required screening items and research findings here.
 
 ---
 
+### Implied correlation (COR1M)
+
+**Requirement:** Monitor Cboe 1-Month Implied Correlation Index — market expectation of average correlation among top 50 SPX names over ~1 month. High values = herd behavior / diversification breakdown; complements VIX and market breadth.
+
+**Options found:**
+
+| Source | Type | Cost | Pros | Cons |
+|--------|------|------|------|------|
+| Cboe Global Indices Feed | Licensed index feed | Paid | Official, real-time | Not free |
+| Yahoo Finance `^COR1M` | Delayed EOD | Free | Known ticker | API returned almost no history in testing |
+| Google Finance `COR1M:INDEXCBOE` | Delayed quote + chart RPC | Free | Quote + ~1yr daily history via `batchexecute` | Undocumented RPC; may break; delayed ~20 min |
+| Investing.com | Web table | Free | Human-readable history | No sanctioned API |
+| Build custom (options IV) | SPX + 50-stock options | Paid data | True implied correlation | Not practical for free stack |
+
+**Decision:** Use free resource — Google Finance (`batchexecute` RPC)
+
+**Rationale:** Verified programmatic pull: current COR1M level, change, previous close, and daily history (~249 points for 1Y window starting Jun 2025). No API key. Same delayed data shown on [Google Finance COR1M page](https://www.google.com/finance/quote/COR1M:INDEXCBOE). Yahoo/yfinance unreliable for this index.
+
+**Source / method:**
+
+- Symbol: `COR1M:INDEXCBOE`
+- Quote RPC: `xh8wxf`
+- Chart RPC: `AiCwsd` with window modes (`1D`=1, `1M`=3, `1Y`=6)
+- Endpoint: `https://www.google.com/finance/_/GoogleFinanceUi/data/batchexecute`
+- Requires `CONSENT=YES+` cookie for EU; quotes delayed per Google terms
+
+**Fields we consume:**
+
+| Field | Use |
+|-------|-----|
+| `quote.price`, `change`, `change_percent` | Current correlation risk level |
+| `quote.previous_close` | Day-over-day context |
+| `history[].date`, `history[].close` | Trend / regime (rising correlation into selloffs) |
+
+**Validation (Jun 2026 spike):** price **10.74**, prev **13.18**, 1Y history **249** daily points from **2025-06-16** → **2026-06-12**.
+
+**Next step:** ~~Add fetcher~~ Done — `src/implied_correlation.py`, cache under `data/correlation/cor1m.json`. Run: `python src/implied_correlation.py --window 1Y`.
+
+**Related indices:** COR3M, COR6M, COR1Y (same Google Finance pattern, different symbol).
+
+---
+
 ### Weekly trend state (10-week MA slope)
 
 **Requirement:** Detect when an individual stock **starts** an overall weekly uptrend (regime change), not just a one-week bounce. Monitor any symbol in a watchlist or universe (e.g. S&P 500).
@@ -164,6 +206,103 @@ Demonstrates why 1-week slope alone misleads: Jan had high 1w/4w slopes (mature)
 
 ---
 
+### Long-term multiple-top breakout (weekly)
+
+**Requirement:** Detect when a stock breaks a **long-term horizontal resistance** formed by **multiple weekly tops** over years (the “green line” on a weekly chart), signaling escape from a multi-year base and the potential start of a new uptrend. Used together with **Weekly trend state (10-week MA slope)** — structural break is the primary event; weekly MA slope confirms regime change.
+
+**Reference pattern:** MU — multi-year ceiling (~164 area on weekly chart), multiple failed highs, then weekly breakout into sustained uptrend. User will supply ticker + timeframe for backtest validation.
+
+**Options found:**
+
+| Source | Type | Cost | Pros | Cons |
+|--------|------|------|------|------|
+| DeanFi support/resistance | Daily pivot JSON | Free | SPY/QQQ/IWM pivots | Prior-session pivots; wrong horizon for multi-year ceiling |
+| StockCharts horizontal S/R | Chart tool | Partial | Visual multi-touch lines | No free API; manual per symbol |
+| 52-week high breakout | Simple rule | Free | Easy to compute | Not the same — ignores years of repeated tops at one level |
+| Build custom (yfinance) | Weekly swing-high clustering | Free | Any symbol; tunable touch count / span | Must define clustering logic; no external validation feed |
+
+**Decision:** Build custom — weekly multi-top resistance + breakout detection (yfinance)
+
+**Rationale:** No free API publishes “multi-year multiple-top resistance” per stock. DeanFi pivots are daily and index-focused. The pattern requires **clustering weekly swing highs** over a long lookback, then detecting **weekly close** above that level. Complements (does not replace) weekly MA slope: breakout = structure; slope = trend confirmation.
+
+**Methodology:**
+
+| Step | Rule |
+|------|------|
+| Weekly bars | Adjusted OHLC, resample `W-FRI` (week-ending Friday) |
+| Lookback | Default **3 years** (~156 weeks); tunable 2–5 years for backtest |
+| Swing high | Week `t` is a swing high if `high[t]` > max(`high[t-1..t-N]`, `high[t+1..t+N]`); default `N = 3` |
+| Touch cluster | Group swing highs within **±2.5%** of each other (`touch_tolerance_pct`) |
+| Valid resistance | Cluster has **≥ 3 touches** (`min_touches`), span **≥ 52 weeks** (`min_span_weeks`) between first and last touch |
+| Resistance level | **Max** touch in cluster (conservative ceiling) — alternative: median (document if changed) |
+| Base quality (optional) | ≥ 60% of lookback weeks closed **below** resistance; last touch ≥ 8 weeks before eval week |
+| Breakout | **Weekly close** > `resistance × (1 + breakout_buffer_pct)`; default buffer **1.0%** (not intraday wick) |
+| Breakout freshness | First break within last **8 weeks** (`breakout_freshness_weeks`) for “new break” screens |
+| Hold rule (strict) | 1 close above (default) or 2 consecutive weekly closes above (`hold_weeks = 2`) |
+| Prior context | Prior 4–8 weeks mostly closed below resistance (not already extended far above) |
+
+**Default thresholds** (tunable in `config/sources.yaml` → `multi_top_breakout`):
+
+| Parameter | Default | Notes |
+|-----------|---------|-------|
+| `lookback_years` | 3 | Extend to 5 for very long bases (MU-style) |
+| `swing_lookback_weeks` | 3 | Local peak definition |
+| `touch_tolerance_pct` | 2.5 | Same “top” band |
+| `min_touches` | 3 | Double/triple top minimum |
+| `min_span_weeks` | 52 | Tops must span ≥ 1 year |
+| `breakout_buffer_pct` | 1.0 | Reduce false breaks |
+| `breakout_freshness_weeks` | 8 | “Just broke” window |
+| `hold_weeks` | 1 | Consecutive closes above |
+| `min_weeks_since_last_touch` | 8 | Avoid chop-at-line false positives |
+| `base_below_resistance_pct` | 60 | % of lookback weeks close < resistance |
+
+**Screen stages** (single symbol or scan):
+
+| Stage | Resistance rule | Weekly MA slope (see above section) |
+|-------|-----------------|-------------------------------------|
+| `WATCH` | Price within 0–5% **below** resistance; valid cluster exists | `BASE` or flattening; `\|slope_4w_pct\| ≤ 0.15` |
+| `BREAK` | Fresh weekly close above resistance + buffer | `early_turn` or `slope_4w_pct > 0.15` within 0–2 weeks of break |
+| `CONFIRMED` | Break within last 4–12 weeks; still above resistance | `CONFIRMED_UP`: `ma_stack` + `breakout_12w` + `slope_4w_pct > 0.15` |
+| `EXTENDED` | Break > 12 weeks ago or > 25% above resistance | `MATURE_UP` or `slope_4w_pct > 1.0` — trend mature; chase risk |
+
+**Combined pass rule** (default for “green line + uptrend start”):
+
+```
+multi_top.breakout_fresh == true
+AND weekly_close > resistance × (1 + breakout_buffer_pct)
+AND (early_turn OR slope_4w_pct > 0.15)
+AND close > weekly_MA10
+```
+
+Optional tighten: require `ma_stack` within 2 weeks of break. Optional loosen: `BREAK` stage only (no slope on exact break week).
+
+**Output fields per symbol per eval week:**
+
+| Field | Use |
+|-------|-----|
+| `week_end`, `close`, `high` | Price context |
+| `resistance_level`, `touch_count`, `touch_dates`, `span_weeks` | Cluster identity (“green line”) |
+| `pct_below_resistance`, `weeks_since_last_touch` | Pre-break / watchlist context |
+| `breakout`, `breakout_week`, `weeks_since_break`, `pct_above_resistance` | Break event |
+| `hold_ok` | Meets `hold_weeks` rule |
+| `stage` | `WATCH` / `BREAK` / `CONFIRMED` / `EXTENDED` / `NONE` |
+| `weekly_trend.state`, `slope_4w_pct`, `early_turn`, `ma_stack` | Joined from weekly trend state (same week) |
+| `combined_signal` | `watch` / `break` / `confirmed` / `extended` / null |
+
+**What this is not:**
+
+- Not 52-week high breakout alone
+- Not DeanFi daily pivot P/R1/S1
+- Not daily 200 MA extension (`src/trend_analysis.py`)
+
+**Validation:** Pending — user will provide **ticker** and **timeframe** to backtest both this indicator and weekly MA slope on the same bars.
+
+**Related code:** `src/weekly_trend_state.py` (planned); `src/multi_top_breakout.py` (planned).
+
+**Next step:** Implement `src/multi_top_breakout.py` + `config/sources.yaml` section (`multi_top_breakout`: thresholds); cache under `data/breakouts/multi_top/`. CLI: `--symbol`, `--as-of`, `--lookback-years`. Then backtest vs user-supplied ticker/timeframe alongside weekly trend state.
+
+---
+
 ## Storage layers (project convention)
 
 | Layer | Location | Stores | Example |
@@ -171,7 +310,7 @@ Demonstrates why 1-week slope alone misleads: Jan had high 1w/4w slopes (mature)
 | **Decisions & research** | `checklist.md` (this file) | Which source, why, field mapping | DeanFi chosen for SPX A/D |
 | **Agent workflow** | `SKILL.md` | How to explore items — not project-specific data | Per-item report template |
 | **Runtime config** | `config/sources.yaml` (when code exists) | URLs, refresh interval, cache path | `breadth.url`, `refresh_minutes: 15` |
-| **Live / cached data** | `data/breadth/`, `data/meanreversion/`, `data/trends/weekly/` | Fetched JSON snapshots | `daily_breadth.json`, weekly state per symbol |
-| **Application code** | `src/` fetcher modules | Fetch, validate, expose metrics | `market_breadth.py`, `mean_reversion.py`, `weekly_trend_state.py` (planned), `trend_analysis.py` |
+| **Live / cached data** | `data/breadth/`, `data/meanreversion/`, `data/correlation/`, `data/trends/weekly/`, `data/breakouts/multi_top/` | Fetched JSON snapshots | `daily_breadth.json`, `cor1m.json`, weekly state, multi-top eval per symbol |
+| **Application code** | `src/` fetcher modules | Fetch, validate, expose metrics | `market_breadth.py`, `mean_reversion.py`, `implied_correlation.py`, `weekly_trend_state.py` (planned), `multi_top_breakout.py` (planned), `trend_analysis.py` |
 
 Do **not** store daily metric values (e.g. today's `advances: 394`) in checklist or skill files — those belong in `data/` or a database once the fetcher runs.

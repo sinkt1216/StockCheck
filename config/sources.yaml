@@ -24,3 +24,30 @@ support_resistance:
   fallback_url: https://raw.githubusercontent.com/GibsonNeo/deanfi-data/main/supportresistence/support_resistence.json
   cache_path: data/supportresistence/support_resistence.json
   refresh_minutes: 1440
+
+implied_correlation:
+  symbol: COR1M:INDEXCBOE
+  cache_path: data/correlation/cor1m.json
+  default_window: 1Y
+  refresh_minutes: 60
+
+weekly_trend:
+  slope_turn: 0.15
+  slope_mature: 1.0
+  regression_weeks: 4
+  ma_short: 10
+  ma_long: 20
+
+multi_top_breakout:
+  lookback_years: 5
+  swing_lookback_weeks: 3
+  touch_tolerance_pct: 18.0
+  min_touches: 3
+  min_span_weeks: 26
+  breakout_buffer_pct: 1.0
+  breakout_freshness_weeks: 8
+  hold_weeks: 1
+  min_weeks_since_last_touch: 8
+  base_below_resistance_pct: 60
+  watch_below_pct: 5.0
+  extended_above_pct: 25.0
