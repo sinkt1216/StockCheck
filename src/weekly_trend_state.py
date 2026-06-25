@@ -15,7 +15,7 @@ try:
 except ImportError:
     yaml = None  # type: ignore[assignment]
 
-from weekly_bars import fetch_weekly_ohlc
+from weekly_bars import fetch_weekly_ohlc, week_start_monday
 
 ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_CONFIG = ROOT / "config" / "sources.yaml"
@@ -110,6 +110,18 @@ def compute_weekly_trend_series(
         higher_low = not math.isnan(pl8) and c > float(pl8)
         breakout_12w = not math.isnan(ph12) and c > float(ph12)
         ma_stack = not any(math.isnan(v) for v in (c, m10, m20)) and c > m10 > m20
+        ma10_above_ma20 = not any(math.isnan(v) for v in (m10, m20)) and m10 > m20
+
+        if i > 0:
+            pm10 = float(ma10.iloc[i - 1]) if not math.isnan(ma10.iloc[i - 1]) else float("nan")
+            pm20 = float(ma20.iloc[i - 1]) if not math.isnan(ma20.iloc[i - 1]) else float("nan")
+            golden_cross = (
+                not any(math.isnan(v) for v in (pm10, pm20, m10, m20))
+                and pm10 <= pm20
+                and m10 > m20
+            )
+        else:
+            golden_cross = False
 
         state = _assign_state(
             slope_4w,
@@ -136,7 +148,9 @@ def compute_weekly_trend_series(
                 "slope_1w_pct": round(slope_1w, 2) if not math.isnan(slope_1w) else None,
                 "slope_4w_pct": round(slope_4w, 2) if not math.isnan(slope_4w) else None,
                 "higher_low": higher_low,
-                "ma_stack": ma_stack,
+                "price_above_ma10_ma20": ma_stack,
+                "ma10_above_ma20": ma10_above_ma20,
+                "golden_cross": golden_cross,
                 "breakout_12w": breakout_12w,
                 "early_turn": early_turn,
                 "confirmed_turn": confirmed_turn,
@@ -203,9 +217,10 @@ def main() -> int:
             flags.append("confirmed_turn")
         flag_str = f"  [{', '.join(flags)}]" if flags else ""
         print(
-            f"{row['week_end']}  ${row['close']:>8}  "
+            f"{week_start_monday(row['week_end'])}  ${row['close']:>8}  "
             f"slope_4w={str(row['slope_4w_pct']):>6}%  "
-            f"stack={'Y' if row['ma_stack'] else 'N'}  "
+            f"ma={'Y' if row['price_above_ma10_ma20'] else 'N'}  "
+            f"gc={'Y' if row['golden_cross'] else 'N'}  "
             f"{row['state']}{flag_str}"
         )
     return 0

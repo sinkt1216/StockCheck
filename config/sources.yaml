@@ -54,3 +54,7 @@ multi_top_breakout:
 
 liquidity:
   min_avg_volume_50d: 300000
+
+weekly_scan:
+  volume_ma_weeks: 20
+  golden_cross_lookback_weeks: 26

@@ -15,7 +15,7 @@ try:
 except ImportError:
     yaml = None  # type: ignore[assignment]
 
-from weekly_bars import fetch_weekly_ohlc
+from weekly_bars import fetch_weekly_ohlc, week_start_monday
 
 ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_CONFIG = ROOT / "config" / "sources.yaml"
@@ -311,7 +311,7 @@ def main() -> int:
         res = f"${row['resistance_level']}" if row["resistance_level"] else "n/a"
         brk = "BREAK" if row["breakout"] else "below"
         print(
-            f"{row['week_end']}  ${row['close']:>8}  res={res:>8}  "
+            f"{week_start_monday(row['week_end'])}  ${row['close']:>8}  res={res:>8}  "
             f"{brk:>5}  stage={row['stage']:<10}  "
             f"wk_since_brk={str(row['weeks_since_break']):>3}"
         )

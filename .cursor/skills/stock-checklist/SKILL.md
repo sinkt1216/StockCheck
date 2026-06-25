@@ -73,7 +73,7 @@ Summarize in chat:
 
 - NYSE weekly scan universe is **common equity only** — see **NYSE universe (common equity scan)** in [checklist.md](checklist.md). Refresh with `python src/build_universe.py` before full scans.
 - After changing hit logic or universe filters, use `python src/weekly_scan.py --refilter data/scans/YYYY-MM-DD.json` instead of re-fetching all symbols.
-- **Liquidity:** hits require `avg_volume_50d > 300,000` (see checklist). Backfill with `--enrich-volume` on an existing scan JSON.
+- **Buy hits:** `combined_signal: buy` when `price_above_ma10_ma20` + positive slopes + acceleration + `volume_spike` + liquidity. Re-filter with `--refilter` on existing scan JSON.
 - Do not store scan hit counts or symbol lists in this skill file — those live in `data/scans/`.
 
 ## Rules

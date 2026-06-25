@@ -206,7 +206,9 @@ Demonstrates why 1-week slope alone misleads: Jan had high 1w/4w slopes (mature)
 
 ---
 
-### Long-term multiple-top breakout (weekly)
+### Long-term multiple-top breakout (weekly) — standalone only
+
+**Status:** Removed from `weekly_scan.py` and `weekly_backtest.py`. Use `python src/multi_top_breakout.py` for optional research only. Scan/backtest use the **buy** rule (slope + volume spike).
 
 **Requirement:** Detect when a stock breaks a **long-term horizontal resistance** formed by **multiple weekly tops** over years (the “green line” on a weekly chart), signaling escape from a multi-year base and the potential start of a new uptrend. Used together with **Weekly trend state (10-week MA slope)** — structural break is the primary event; weekly MA slope confirms regime change.
 
@@ -287,7 +289,7 @@ Optional tighten: require `ma_stack` within 2 weeks of break. Optional loosen: `
 | `hold_ok` | Meets `hold_weeks` rule |
 | `stage` | `WATCH` / `BREAK` / `CONFIRMED` / `EXTENDED` / `NONE` |
 | `weekly_trend.state`, `slope_4w_pct`, `early_turn`, `ma_stack` | Joined from weekly trend state (same week) |
-| `combined_signal` | `watch` / `break` / `confirmed` / `extended` / null |
+| `combined_signal` | `watch` / `break` / `confirmed` / `extended` / null — `watch` when `WATCH` stage + (rising slope **or** `volume_spike`) |
 
 **What this is not:**
 
@@ -329,10 +331,27 @@ python src/build_universe.py --exchange NASDAQ  # Nasdaq → nasdaq.json
 python src/weekly_scan.py                       # full scan (~20 min NYSE)
 python src/weekly_scan.py --universe data/universe/nasdaq.json
 python src/weekly_scan.py --enrich-volume data/scans/YYYY-MM-DD_nasdaq.json
+python src/weekly_scan.py --enrich-weekly-volume data/scans/YYYY-MM-DD_nasdaq.json
 python src/weekly_scan.py --refilter data/scans/YYYY-MM-DD.json   # re-apply hit rules + universe filter without re-fetching
 ```
 
-**Hit file filters** (`*_hits.json`): `close > MA10 > MA20` plus `combined_signal`, `early_turn`, or `first_break`. Re-filter after logic or universe changes — no need to re-run yfinance unless the week rolled.
+**Hit file filters** (`*_hits.json`) — `combined_signal: buy` only:
+
+| Rule | Detail |
+|------|--------|
+| `price_above_ma10_ma20` | `close > MA10 > MA20` |
+| `golden_cross` | MA10 crossed above MA20 this week **or** within last 26 weeks (`golden_cross_recent`) |
+| `slope_1w_pct` | > 0 |
+| `slope_4w_pct` | > 0 |
+| Slope acceleration | `slope_4w_delta > 0` OR `slope_1w_delta > 0` |
+| `volume_spike` | Weekly volume > 20-week MA |
+| `avg_volume_50d` | > 300,000 |
+
+Multi-top resistance is **not** used in scan or backtest hits (standalone CLI only).
+
+```bash
+python src/weekly_scan.py --refilter data/scans/YYYY-MM-DD_nasdaq.json
+```
 
 ---
 
@@ -353,6 +372,20 @@ python src/weekly_scan.py --enrich-volume data/scans/2026-06-21_nasdaq.json   # 
 ```
 
 New full scans fetch volume per symbol automatically.
+
+---
+
+### Volume spike (weekly watch signal)
+
+**Requirement:** `combined_signal = watch` when price is near resistance (`mt_stage == WATCH`) **and** either:
+- `slope_4w_pct > 0` **and** `slope_4w_delta > 0` (rising slope), **or**
+- **Weekly volume spike:** current week volume **>** 20-week moving average of weekly volume
+
+**Fields:** `weekly_volume`, `volume_ma20`, `volume_spike` (bool) on each scan row.
+
+**Config:** `config/sources.yaml` → `weekly_scan.volume_ma_weeks: 20`
+
+**Note:** `--refilter` applies spike logic only if `volume_spike` is already on rows (from a full scan). Re-scan or backtest for fresh weekly volume.
 
 ---
 
