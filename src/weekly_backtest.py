@@ -9,7 +9,7 @@ from typing import Any
 import pandas as pd
 
 from weekly_bars import compute_weekly_volume_series, fetch_weekly_ohlc, week_start_monday
-from weekly_scan import _assign_buy_signal, load_liquidity_config, load_scan_config
+from weekly_scan import _assign_buy_signal, load_liquidity_config
 from weekly_trend_state import compute_weekly_trend_series, load_config as load_wt_config
 
 
@@ -23,6 +23,10 @@ def _fmt_pct(value: Any, width: int = 6, signed: bool = True) -> str:
     if signed:
         return f"{float(value):+{width - 1}.2f}%"
     return f"{float(value):{width - 1}.2f}%"
+
+
+def _yn(value: Any) -> str:
+    return "Y" if value else "N"
 
 
 def _slope_change_label(delta: float | None, early_turn: bool, prev_state: str | None, state: str) -> str:
@@ -52,18 +56,7 @@ def _slope_event(row: pd.Series) -> str:
         parts.append(label)
     if row.get("volume_spike"):
         parts.append("VOL_SPIKE")
-    if row.get("wt_golden_cross"):
-        parts.append("GC")
     return "+".join(parts) if parts else ""
-
-
-def _add_golden_cross_recent(df: pd.DataFrame, lookback_weeks: int) -> pd.Series:
-    flags: list[bool] = []
-    cross_col = df["wt_golden_cross"].fillna(False).astype(bool).tolist()
-    for i in range(len(cross_col)):
-        start = max(0, i - lookback_weeks + 1)
-        flags.append(any(cross_col[start : i + 1]))
-    return pd.Series(flags, index=df.index)
 
 
 def _row_to_buy_dict(row: pd.Series) -> dict[str, Any]:
@@ -78,7 +71,7 @@ def _row_to_buy_dict(row: pd.Series) -> dict[str, Any]:
     }
 
 
-def enrich_backtest(df: pd.DataFrame, *, min_avg_volume_50d: int, golden_cross_lookback_weeks: int) -> pd.DataFrame:
+def enrich_backtest(df: pd.DataFrame, *, min_avg_volume_50d: int) -> pd.DataFrame:
     out = df.copy().reset_index(drop=True)
     out["wt_slope_4w_delta"] = out["wt_slope_4w_pct"].diff().round(2)
     out["wt_slope_1w_delta"] = out["wt_slope_1w_pct"].diff().round(2)
@@ -95,7 +88,6 @@ def enrich_backtest(df: pd.DataFrame, *, min_avg_volume_50d: int, golden_cross_l
         for _, row in out.iterrows()
     ]
     out["slope_event"] = out.apply(_slope_event, axis=1)
-    out["golden_cross_recent"] = _add_golden_cross_recent(out, golden_cross_lookback_weeks)
     out["combined_signal"] = [
         _assign_buy_signal(_row_to_buy_dict(row), min_avg_volume_50d=min_avg_volume_50d)[
             "combined_signal"
@@ -112,8 +104,6 @@ def run_backtest(
     end: str | None = None,
 ) -> pd.DataFrame:
     wt_cfg = load_wt_config()
-    gc_lookback = int(load_scan_config()["golden_cross_lookback_weeks"])
-    min_avg_volume_50d = int(load_liquidity_config()["min_avg_volume_50d"])
     weekly = fetch_weekly_ohlc(symbol, period="max")
 
     trend = compute_weekly_trend_series(weekly, config=wt_cfg)
@@ -128,7 +118,7 @@ def run_backtest(
     if end:
         merged = merged[merged["week_end"] <= end]
 
-    return enrich_backtest(merged, min_avg_volume_50d=0, golden_cross_lookback_weeks=gc_lookback)
+    return enrich_backtest(merged, min_avg_volume_50d=0)
 
 
 def _build_buy_weeks_summary(df: pd.DataFrame, *, ccy: str) -> list[str]:
@@ -142,7 +132,8 @@ def _build_buy_weeks_summary(df: pd.DataFrame, *, ccy: str) -> list[str]:
             f"slp1w={_fmt_pct(row.get('wt_slope_1w_pct'), 6).strip()}  "
             f"slp4w={_fmt_pct(row.get('wt_slope_4w_pct'), 6).strip()}  "
             f"d4w={_fmt_pct(row.get('wt_slope_4w_delta'), 6).strip()}  "
-            f"{'GC' if row.get('wt_golden_cross') else ''}  "
+            f"10>20={_yn(row.get('wt_ma10_above_ma20'))}  "
+            f"10>50={_yn(row.get('wt_ma10_above_ma50'))}  "
             f"{'VOL_SPIKE' if row.get('volume_spike') else ''}"
         )
     return lines
@@ -155,7 +146,7 @@ def summarize_backtest(symbol: str, df: pd.DataFrame) -> str:
         "=" * 100,
         "",
         "Columns: slp1w/slp4w = weekly MA10 slope | d1w/d4w = week-over-week change",
-        "         MA = price_above_ma10_ma20 | GC = golden cross reference (not required for buy)",
+        "         MA = price_above_ma10_ma20 (buy rule) | 10>20/10>50 = MA10 vs MA20/MA50 (reference)",
         "         VolSpk = weekly volume > 20w MA",
         "         Signal = buy when MA + slopes + acceleration + volume_spike (liquidity skipped here)",
         "Week column = Monday (week open). Bars use W-FRI close; --from/--to filter on Friday week-end.",
@@ -163,28 +154,26 @@ def summarize_backtest(symbol: str, df: pd.DataFrame) -> str:
     ]
 
     header = (
-        f"{'Week Mon':<11} {'Close':>8} {'Trend':<12} "
-        f"{'slp1w':>7} {'slp4w':>7} {'d1w':>7} {'d4w':>7} {'MA':>3} {'GC':>3} {'VolSpk':>6} "
+        f"{'Week Mon':<11} {'Close':>8} "
+        f"{'slp1w':>7} {'slp4w':>7} {'d1w':>7} {'d4w':>7} {'MA':>3} "
+        f"{'10>20':>5} {'10>50':>5} {'VolSpk':>6} "
         f"{'Slope_ev':<20} {'Signal':<6}"
     )
     lines.extend([header, "-" * 100])
 
     for _, row in df.iterrows():
         signal = str(row["combined_signal"]) if pd.notna(row["combined_signal"]) else ""
-        ma = "Y" if row.get("wt_price_above_ma10_ma20") else "N"
-        gc = "Y" if row.get("wt_golden_cross") else "N"
-        vol = "Y" if row.get("volume_spike") else "N"
         lines.append(
             f"{row['week_start']:<11} "
             f"{ccy}{row['wt_close']:>7.2f} "
-            f"{row['wt_state']:<12} "
             f"{_fmt_pct(row.get('wt_slope_1w_pct'), 7)} "
             f"{_fmt_pct(row.get('wt_slope_4w_pct'), 7)} "
             f"{_fmt_pct(row.get('wt_slope_1w_delta'), 7)} "
             f"{_fmt_pct(row.get('wt_slope_4w_delta'), 7)} "
-            f"{ma:>3} "
-            f"{gc:>3} "
-            f"{vol:>6} "
+            f"{_yn(row.get('wt_price_above_ma10_ma20')):>3} "
+            f"{_yn(row.get('wt_ma10_above_ma20')):>5} "
+            f"{_yn(row.get('wt_ma10_above_ma50')):>5} "
+            f"{_yn(row.get('volume_spike')):>6} "
             f"{row['slope_event']:<20} "
             f"{signal:<6}"
         )

@@ -22,7 +22,7 @@ DEFAULT_UNIVERSE = ROOT / "data" / "universe" / "nyse.json"
 DEFAULT_SCAN_DIR = ROOT / "data" / "scans"
 
 LIQUIDITY_DEFAULTS = {"min_avg_volume_50d": 300_000}
-SCAN_DEFAULTS = {"volume_ma_weeks": 20, "golden_cross_lookback_weeks": 26}
+SCAN_DEFAULTS = {"volume_ma_weeks": 20}
 
 
 def load_liquidity_config(config_path: Path = DEFAULT_CONFIG) -> dict[str, Any]:
@@ -57,6 +57,11 @@ def _normalize_row(row: dict[str, Any]) -> dict[str, Any]:
     out = dict(row)
     if "price_above_ma10_ma20" not in out:
         out["price_above_ma10_ma20"] = bool(out.get("ma_stack"))
+    ma10, ma20, ma50 = out.get("ma10"), out.get("ma20"), out.get("ma50")
+    if out.get("ma10_above_ma20") is None and ma10 is not None and ma20 is not None:
+        out["ma10_above_ma20"] = ma10 > ma20
+    if out.get("ma10_above_ma50") is None and ma10 is not None and ma50 is not None:
+        out["ma10_above_ma50"] = ma10 > ma50
     return out
 
 
@@ -73,15 +78,6 @@ def _passes_volume(row: dict[str, Any], *, min_avg_volume_50d: int) -> bool:
         return True
     vol = row.get("avg_volume_50d")
     return vol is not None and vol > min_avg_volume_50d
-
-
-def _golden_cross_recent(trend_df: Any, lookback_weeks: int) -> bool:
-    if trend_df is None or len(trend_df) == 0 or lookback_weeks <= 0:
-        return False
-    tail = trend_df.iloc[-lookback_weeks:]
-    if "golden_cross" not in tail.columns:
-        return False
-    return bool(tail["golden_cross"].any())
 
 
 def _passes_buy_rule(row: dict[str, Any], *, min_avg_volume_50d: int) -> bool:
@@ -109,7 +105,7 @@ def _is_hit(row: dict[str, Any], *, min_avg_volume_50d: int = 0) -> bool:
     return row.get("combined_signal") == "buy"
 
 
-def _hit_filter_meta(*, min_avg_volume_50d: int, golden_cross_lookback_weeks: int) -> dict[str, Any]:
+def _hit_filter_meta(*, min_avg_volume_50d: int) -> dict[str, Any]:
     return {
         "combined_signal": "buy",
         "price_above_ma10_ma20": True,
@@ -120,11 +116,8 @@ def _hit_filter_meta(*, min_avg_volume_50d: int, golden_cross_lookback_weeks: in
         "min_avg_volume_50d": min_avg_volume_50d,
         "common_equity_universe": True,
         "reference_fields": {
-            "golden_cross": "MA10 crossed above MA20 on latest week (not required for buy)",
-            "golden_cross_recent": (
-                f"golden cross within last {golden_cross_lookback_weeks} weeks (reference only)"
-            ),
-            "ma10_above_ma20": "MA10 > MA20 on latest week (reference only)",
+            "ma10_above_ma20": "weekly MA10 > MA20 (not required for buy)",
+            "ma10_above_ma50": "weekly MA10 > MA50 (not required for buy)",
         },
     }
 
@@ -134,7 +127,6 @@ def scan_symbol(symbol: str) -> dict[str, Any] | None:
     scan_cfg = load_scan_config()
     min_avg_volume_50d = int(load_liquidity_config()["min_avg_volume_50d"])
     vol_ma_weeks = int(scan_cfg["volume_ma_weeks"])
-    gc_lookback = int(scan_cfg["golden_cross_lookback_weeks"])
 
     try:
         weekly = fetch_weekly_ohlc(symbol, period="max")
@@ -172,6 +164,7 @@ def scan_symbol(symbol: str) -> dict[str, Any] | None:
         "close": trend.get("close"),
         "ma10": trend.get("ma10"),
         "ma20": trend.get("ma20"),
+        "ma50": trend.get("ma50"),
         "trend_state": trend.get("state"),
         "slope_1w_pct": slope_1w,
         "slope_4w_pct": slope_4w,
@@ -181,8 +174,7 @@ def scan_symbol(symbol: str) -> dict[str, Any] | None:
         "confirmed_turn": bool(trend.get("confirmed_turn")),
         "price_above_ma10_ma20": bool(trend.get("price_above_ma10_ma20")),
         "ma10_above_ma20": bool(trend.get("ma10_above_ma20")),
-        "golden_cross": bool(trend.get("golden_cross")),
-        "golden_cross_recent": _golden_cross_recent(trend_df, gc_lookback),
+        "ma10_above_ma50": bool(trend.get("ma10_above_ma50")),
         "avg_volume_50d": fetch_avg_volume_50d(symbol),
         "weekly_volume": vol_metrics["weekly_volume"],
         "volume_ma20": vol_metrics["volume_ma20"],
@@ -250,13 +242,10 @@ def enrich_scan_weekly_volume(
     *,
     progress: bool = True,
     min_avg_volume_50d: int | None = None,
-    golden_cross_lookback_weeks: int | None = None,
 ) -> dict[str, Any]:
     """Backfill weekly volume spike fields and recompute buy hits."""
     if min_avg_volume_50d is None:
         min_avg_volume_50d = int(load_liquidity_config()["min_avg_volume_50d"])
-    if golden_cross_lookback_weeks is None:
-        golden_cross_lookback_weeks = int(load_scan_config()["golden_cross_lookback_weeks"])
     vol_ma_weeks = int(load_scan_config()["volume_ma_weeks"])
     results: list[dict[str, Any]] = []
     total = len(payload.get("results", []))
@@ -270,9 +259,11 @@ def enrich_scan_weekly_volume(
             updated.update(latest_volume_spike(weekly, ma_weeks=vol_ma_weeks))
             trend_df = compute_weekly_trend_series(weekly, config=load_wt_config())
             trend = trend_df.iloc[-1].to_dict()
-            updated["golden_cross"] = bool(trend.get("golden_cross"))
+            updated["ma10"] = trend.get("ma10")
+            updated["ma20"] = trend.get("ma20")
+            updated["ma50"] = trend.get("ma50")
             updated["ma10_above_ma20"] = bool(trend.get("ma10_above_ma20"))
-            updated["golden_cross_recent"] = _golden_cross_recent(trend_df, golden_cross_lookback_weeks)
+            updated["ma10_above_ma50"] = bool(trend.get("ma10_above_ma50"))
         except RuntimeError:
             updated["weekly_volume"] = None
             updated["volume_ma20"] = None
@@ -292,12 +283,9 @@ def write_scan_outputs(
     *,
     stamp: str | None = None,
     min_avg_volume_50d: int | None = None,
-    golden_cross_lookback_weeks: int | None = None,
 ) -> tuple[Path, Path]:
     if min_avg_volume_50d is None:
         min_avg_volume_50d = int(load_liquidity_config()["min_avg_volume_50d"])
-    if golden_cross_lookback_weeks is None:
-        golden_cross_lookback_weeks = int(load_scan_config()["golden_cross_lookback_weeks"])
     output_dir.mkdir(parents=True, exist_ok=True)
     stamp = stamp or datetime.now(UTC).strftime("%Y-%m-%d")
     full_path = output_dir / f"{stamp}.json"
@@ -307,10 +295,7 @@ def write_scan_outputs(
         "generated_at": payload["generated_at"],
         "universe_count": payload["universe_count"],
         "hits": payload["hits"],
-        "hit_filters": _hit_filter_meta(
-            min_avg_volume_50d=min_avg_volume_50d,
-            golden_cross_lookback_weeks=golden_cross_lookback_weeks,
-        ),
+        "hit_filters": _hit_filter_meta(min_avg_volume_50d=min_avg_volume_50d),
         "rows": payload["hit_rows"],
     }
     hits_path.write_text(json.dumps(hits_payload, indent=2), encoding="utf-8")
@@ -319,7 +304,6 @@ def write_scan_outputs(
 
 def run_scan(symbols: list[str], *, progress: bool = True) -> dict[str, Any]:
     min_avg_volume_50d = int(load_liquidity_config()["min_avg_volume_50d"])
-    golden_cross_lookback_weeks = int(load_scan_config()["golden_cross_lookback_weeks"])
     results: list[dict[str, Any]] = []
     errors: list[dict[str, str]] = []
 
@@ -358,18 +342,14 @@ def summarize_scan(payload: dict[str, Any]) -> str:
         f"Buy hits: {payload['hits']}  Errors: {payload['errors']}",
         f"Week (Mon): {week_start_monday(payload['hit_rows'][0]['week_end']) if payload['hit_rows'] else 'n/a'}",
         "",
-        f"{'Symbol':<8} {'Close':>8} {'Trend':<12} {'slp1w':>7} {'slp4w':>7} {'d4w':>7} {'Flags'}",
-        "-" * 72,
+        f"{'Symbol':<8} {'Close':>8} {'slp1w':>7} {'slp4w':>7} {'d4w':>7} {'10>20':>5} {'10>50':>5} {'Flags'}",
+        "-" * 78,
     ]
 
     for row in sorted(payload["hit_rows"], key=lambda r: r["symbol"]):
         flags: list[str] = ["BUY"]
         if row.get("volume_spike"):
             flags.append("VOL_SPIKE")
-        if row.get("golden_cross"):
-            flags.append("GC")
-        elif row.get("golden_cross_recent"):
-            flags.append("GC_recent")
         if row.get("early_turn"):
             flags.append("early_turn")
         slope = row.get("slope_4w_pct")
@@ -378,9 +358,11 @@ def summarize_scan(payload: dict[str, Any]) -> str:
         s1_str = f"{s1:+.2f}%" if s1 is not None else "n/a"
         d4 = row.get("slope_4w_delta")
         d4_str = f"{d4:+.2f}%" if d4 is not None else "n/a"
+        ma20 = "Y" if row.get("ma10_above_ma20") else "N"
+        ma50 = "Y" if row.get("ma10_above_ma50") else "N"
         lines.append(
             f"{row['symbol']:<8} ${row.get('close', 0):>7.2f} "
-            f"{row.get('trend_state', ''):<12} {s1_str:>7} {slope_str:>7} {d4_str:>7} "
+            f"{s1_str:>7} {slope_str:>7} {d4_str:>7} {ma20:>5} {ma50:>5} "
             f"{', '.join(flags)}"
         )
     return "\n".join(lines)

@@ -37,6 +37,7 @@ weekly_trend:
   regression_weeks: 4
   ma_short: 10
   ma_long: 20
+  ma_medium: 50
 
 multi_top_breakout:
   lookback_years: 5
@@ -57,4 +58,3 @@ liquidity:
 
 weekly_scan:
   volume_ma_weeks: 20
-  golden_cross_lookback_weeks: 26

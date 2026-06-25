@@ -346,7 +346,7 @@ python src/weekly_scan.py --refilter data/scans/YYYY-MM-DD.json   # re-apply hit
 | `volume_spike` | Weekly volume > 20-week MA |
 | `avg_volume_50d` | > 300,000 |
 
-**Reference only** (on each scan row, not required for buy): `golden_cross`, `golden_cross_recent`, `ma10_above_ma20`.
+**Reference only** (on each scan row, not required for buy): `ma10_above_ma20`, `ma10_above_ma50`.
 
 Multi-top resistance is **not** used in scan or backtest hits (standalone CLI only).
 
