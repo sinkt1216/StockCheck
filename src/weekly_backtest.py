@@ -69,10 +69,6 @@ def _add_golden_cross_recent(df: pd.DataFrame, lookback_weeks: int) -> pd.Series
 def _row_to_buy_dict(row: pd.Series) -> dict[str, Any]:
     return {
         "price_above_ma10_ma20": bool(row.get("wt_price_above_ma10_ma20")),
-        "golden_cross": bool(row.get("wt_golden_cross")),
-        "golden_cross_recent": bool(row.get("golden_cross_recent")),
-        "ma10": row.get("wt_ma10"),
-        "ma20": row.get("wt_ma20"),
         "slope_1w_pct": row.get("wt_slope_1w_pct"),
         "slope_4w_pct": row.get("wt_slope_4w_pct"),
         "slope_1w_delta": row.get("wt_slope_1w_delta"),
@@ -101,11 +97,9 @@ def enrich_backtest(df: pd.DataFrame, *, min_avg_volume_50d: int, golden_cross_l
     out["slope_event"] = out.apply(_slope_event, axis=1)
     out["golden_cross_recent"] = _add_golden_cross_recent(out, golden_cross_lookback_weeks)
     out["combined_signal"] = [
-        _assign_buy_signal(
-            _row_to_buy_dict(row),
-            min_avg_volume_50d=min_avg_volume_50d,
-            golden_cross_lookback_weeks=golden_cross_lookback_weeks,
-        )["combined_signal"]
+        _assign_buy_signal(_row_to_buy_dict(row), min_avg_volume_50d=min_avg_volume_50d)[
+            "combined_signal"
+        ]
         for _, row in out.iterrows()
     ]
     return out
@@ -161,8 +155,9 @@ def summarize_backtest(symbol: str, df: pd.DataFrame) -> str:
         "=" * 100,
         "",
         "Columns: slp1w/slp4w = weekly MA10 slope | d1w/d4w = week-over-week change",
-        "         MA = price_above_ma10_ma20 | GC = golden cross (MA10 x MA20) | VolSpk = weekly volume > 20w MA",
-        "         Signal = buy when MA + golden cross (this week or last 26w) + slopes + accel + volume_spike",
+        "         MA = price_above_ma10_ma20 | GC = golden cross reference (not required for buy)",
+        "         VolSpk = weekly volume > 20w MA",
+        "         Signal = buy when MA + slopes + acceleration + volume_spike (liquidity skipped here)",
         "Week column = Monday (week open). Bars use W-FRI close; --from/--to filter on Friday week-end.",
         "",
     ]

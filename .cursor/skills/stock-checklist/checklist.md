@@ -340,12 +340,13 @@ python src/weekly_scan.py --refilter data/scans/YYYY-MM-DD.json   # re-apply hit
 | Rule | Detail |
 |------|--------|
 | `price_above_ma10_ma20` | `close > MA10 > MA20` |
-| `golden_cross` | MA10 crossed above MA20 this week **or** within last 26 weeks (`golden_cross_recent`) |
 | `slope_1w_pct` | > 0 |
 | `slope_4w_pct` | > 0 |
 | Slope acceleration | `slope_4w_delta > 0` OR `slope_1w_delta > 0` |
 | `volume_spike` | Weekly volume > 20-week MA |
 | `avg_volume_50d` | > 300,000 |
+
+**Reference only** (on each scan row, not required for buy): `golden_cross`, `golden_cross_recent`, `ma10_above_ma20`.
 
 Multi-top resistance is **not** used in scan or backtest hits (standalone CLI only).
 

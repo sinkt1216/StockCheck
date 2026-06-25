@@ -84,23 +84,8 @@ def _golden_cross_recent(trend_df: Any, lookback_weeks: int) -> bool:
     return bool(tail["golden_cross"].any())
 
 
-def _passes_golden_cross(row: dict[str, Any]) -> bool:
-    if row.get("golden_cross"):
-        return True
-    recent = row.get("golden_cross_recent")
-    if recent is not None:
-        return bool(recent)
-    # Legacy rows (no cross history): require MA10 above MA20 on latest week
-    ma10, ma20 = row.get("ma10"), row.get("ma20")
-    return ma10 is not None and ma20 is not None and ma10 > ma20
-
-
-def _passes_buy_rule(
-    row: dict[str, Any], *, min_avg_volume_50d: int, golden_cross_lookback_weeks: int
-) -> bool:
+def _passes_buy_rule(row: dict[str, Any], *, min_avg_volume_50d: int) -> bool:
     if not row.get("price_above_ma10_ma20"):
-        return False
-    if not _passes_golden_cross(row):
         return False
     if not _passes_volume(row, min_avg_volume_50d=min_avg_volume_50d):
         return False
@@ -112,25 +97,15 @@ def _passes_buy_rule(
     return bool(row.get("volume_spike"))
 
 
-def _assign_buy_signal(
-    row: dict[str, Any], *, min_avg_volume_50d: int, golden_cross_lookback_weeks: int
-) -> dict[str, Any]:
+def _assign_buy_signal(row: dict[str, Any], *, min_avg_volume_50d: int) -> dict[str, Any]:
     row = _normalize_row(row)
     row["combined_signal"] = (
-        "buy"
-        if _passes_buy_rule(
-            row,
-            min_avg_volume_50d=min_avg_volume_50d,
-            golden_cross_lookback_weeks=golden_cross_lookback_weeks,
-        )
-        else None
+        "buy" if _passes_buy_rule(row, min_avg_volume_50d=min_avg_volume_50d) else None
     )
     return row
 
 
-def _is_hit(
-    row: dict[str, Any], *, min_avg_volume_50d: int = 0, golden_cross_lookback_weeks: int = 26
-) -> bool:
+def _is_hit(row: dict[str, Any], *, min_avg_volume_50d: int = 0) -> bool:
     return row.get("combined_signal") == "buy"
 
 
@@ -138,13 +113,19 @@ def _hit_filter_meta(*, min_avg_volume_50d: int, golden_cross_lookback_weeks: in
     return {
         "combined_signal": "buy",
         "price_above_ma10_ma20": True,
-        "golden_cross": f"this week OR within last {golden_cross_lookback_weeks} weeks",
         "slope_1w_positive": True,
         "slope_4w_positive": True,
         "slope_acceleration": "slope_4w_delta > 0 OR slope_1w_delta > 0",
         "volume_spike": True,
         "min_avg_volume_50d": min_avg_volume_50d,
         "common_equity_universe": True,
+        "reference_fields": {
+            "golden_cross": "MA10 crossed above MA20 on latest week (not required for buy)",
+            "golden_cross_recent": (
+                f"golden cross within last {golden_cross_lookback_weeks} weeks (reference only)"
+            ),
+            "ma10_above_ma20": "MA10 > MA20 on latest week (reference only)",
+        },
     }
 
 
@@ -208,9 +189,7 @@ def scan_symbol(symbol: str) -> dict[str, Any] | None:
         "volume_spike": vol_metrics["volume_spike"],
         "combined_signal": None,
     }
-    return _assign_buy_signal(
-        row, min_avg_volume_50d=min_avg_volume_50d, golden_cross_lookback_weeks=gc_lookback
-    )
+    return _assign_buy_signal(row, min_avg_volume_50d=min_avg_volume_50d)
 
 
 def refilter_scan(
@@ -218,35 +197,18 @@ def refilter_scan(
     symbols: list[str] | None = None,
     *,
     min_avg_volume_50d: int | None = None,
-    golden_cross_lookback_weeks: int | None = None,
 ) -> dict[str, Any]:
     """Re-apply buy rule to an existing scan (no yfinance)."""
     if min_avg_volume_50d is None:
         min_avg_volume_50d = int(load_liquidity_config()["min_avg_volume_50d"])
-    if golden_cross_lookback_weeks is None:
-        golden_cross_lookback_weeks = int(load_scan_config()["golden_cross_lookback_weeks"])
     allowed = {s.upper() for s in symbols} if symbols is not None else None
     results: list[dict[str, Any]] = []
     for row in payload.get("results", []):
         if allowed is not None and row.get("symbol", "").upper() not in allowed:
             continue
-        results.append(
-            _assign_buy_signal(
-                row,
-                min_avg_volume_50d=min_avg_volume_50d,
-                golden_cross_lookback_weeks=golden_cross_lookback_weeks,
-            )
-        )
+        results.append(_assign_buy_signal(row, min_avg_volume_50d=min_avg_volume_50d))
 
-    hits = [
-        r
-        for r in results
-        if _is_hit(
-            r,
-            min_avg_volume_50d=min_avg_volume_50d,
-            golden_cross_lookback_weeks=golden_cross_lookback_weeks,
-        )
-    ]
+    hits = [r for r in results if _is_hit(r, min_avg_volume_50d=min_avg_volume_50d)]
     out = dict(payload)
     out["results"] = results
     out["hit_rows"] = hits
@@ -262,13 +224,10 @@ def enrich_scan_volume(
     *,
     progress: bool = True,
     min_avg_volume_50d: int | None = None,
-    golden_cross_lookback_weeks: int | None = None,
 ) -> dict[str, Any]:
     """Fetch 50-day average volume for each row and recompute buy hits."""
     if min_avg_volume_50d is None:
         min_avg_volume_50d = int(load_liquidity_config()["min_avg_volume_50d"])
-    if golden_cross_lookback_weeks is None:
-        golden_cross_lookback_weeks = int(load_scan_config()["golden_cross_lookback_weeks"])
     results: list[dict[str, Any]] = []
     total = len(payload.get("results", []))
     for i, row in enumerate(payload.get("results", []), start=1):
@@ -277,25 +236,11 @@ def enrich_scan_volume(
             print(f"Volume {i}/{total}: {symbol}...", file=sys.stderr)
         updated = _normalize_row(row)
         updated["avg_volume_50d"] = fetch_avg_volume_50d(symbol)
-        results.append(
-            _assign_buy_signal(
-                updated,
-                min_avg_volume_50d=min_avg_volume_50d,
-                golden_cross_lookback_weeks=golden_cross_lookback_weeks,
-            )
-        )
+        results.append(_assign_buy_signal(updated, min_avg_volume_50d=min_avg_volume_50d))
 
     out = dict(payload)
     out["results"] = results
-    out["hit_rows"] = [
-        r
-        for r in results
-        if _is_hit(
-            r,
-            min_avg_volume_50d=min_avg_volume_50d,
-            golden_cross_lookback_weeks=golden_cross_lookback_weeks,
-        )
-    ]
+    out["hit_rows"] = [r for r in results if _is_hit(r, min_avg_volume_50d=min_avg_volume_50d)]
     out["hits"] = len(out["hit_rows"])
     return out
 
@@ -332,25 +277,11 @@ def enrich_scan_weekly_volume(
             updated["weekly_volume"] = None
             updated["volume_ma20"] = None
             updated["volume_spike"] = False
-        results.append(
-            _assign_buy_signal(
-                updated,
-                min_avg_volume_50d=min_avg_volume_50d,
-                golden_cross_lookback_weeks=golden_cross_lookback_weeks,
-            )
-        )
+        results.append(_assign_buy_signal(updated, min_avg_volume_50d=min_avg_volume_50d))
 
     out = dict(payload)
     out["results"] = results
-    out["hit_rows"] = [
-        r
-        for r in results
-        if _is_hit(
-            r,
-            min_avg_volume_50d=min_avg_volume_50d,
-            golden_cross_lookback_weeks=golden_cross_lookback_weeks,
-        )
-    ]
+    out["hit_rows"] = [r for r in results if _is_hit(r, min_avg_volume_50d=min_avg_volume_50d)]
     out["hits"] = len(out["hit_rows"])
     return out
 
@@ -408,15 +339,7 @@ def run_scan(symbols: list[str], *, progress: bool = True) -> dict[str, Any]:
             continue
         results.append(row)
 
-    hits = [
-        r
-        for r in results
-        if _is_hit(
-            r,
-            min_avg_volume_50d=min_avg_volume_50d,
-            golden_cross_lookback_weeks=golden_cross_lookback_weeks,
-        )
-    ]
+    hits = [r for r in results if _is_hit(r, min_avg_volume_50d=min_avg_volume_50d)]
     return {
         "generated_at": datetime.now(UTC).isoformat().replace("+00:00", "Z"),
         "universe_count": total,
