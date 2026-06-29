@@ -289,7 +289,7 @@ Optional tighten: require `ma_stack` within 2 weeks of break. Optional loosen: `
 | `hold_ok` | Meets `hold_weeks` rule |
 | `stage` | `WATCH` / `BREAK` / `CONFIRMED` / `EXTENDED` / `NONE` |
 | `weekly_trend.state`, `slope_4w_pct`, `early_turn`, `ma_stack` | Joined from weekly trend state (same week) |
-| `combined_signal` | `watch` / `break` / `confirmed` / `extended` / null — `watch` when `WATCH` stage + (rising slope **or** `volume_spike`) |
+| `combined_signal` | `buy` / `watch` / null — see **Hit file filters** below |
 
 **What this is not:**
 
@@ -335,7 +335,17 @@ python src/weekly_scan.py --enrich-weekly-volume data/scans/YYYY-MM-DD_nasdaq.js
 python src/weekly_scan.py --refilter data/scans/YYYY-MM-DD.json   # re-apply hit rules + universe filter without re-fetching
 ```
 
-**Hit file filters** (`*_hits.json`) — `combined_signal: buy` only:
+**Hit file filters** (`*_hits.json`) — `combined_signal: buy` only. Full scan JSON also has `watch` rows.
+
+### `combined_signal` values
+
+| Value | Meaning |
+|-------|---------|
+| `buy` | Full entry rule passed (see below) |
+| `watch` | Early slope turn — MA10 weekly slope accelerating before full buy setup |
+| `null` | Neither |
+
+**Buy** (`*_hits.json`):
 
 | Rule | Detail |
 |------|--------|
@@ -346,7 +356,15 @@ python src/weekly_scan.py --refilter data/scans/YYYY-MM-DD.json   # re-apply hit
 | `volume_spike` | Weekly volume > 20-week MA |
 | `avg_volume_50d` | > 300,000 |
 
-**Reference only** (on each scan row, not required for buy): `ma10_above_ma20`, `ma10_above_ma50`.
+**Watch** (full scan JSON only, not `*_hits.json`):
+
+| Rule | Detail |
+|------|--------|
+| `slope_4w_turning` | `early_turn` OR `slope_4w_delta > 0` |
+| `slope_1w_accelerating` | `slope_1w_pct > 0` AND `slope_1w_delta > 0` |
+| Not `buy` | Watch is suppressed when buy rules already pass |
+
+**Reference only** (on each scan row, not required for buy or watch): `ma10_above_ma20`.
 
 Multi-top resistance is **not** used in scan or backtest hits (standalone CLI only).
 
@@ -376,11 +394,11 @@ New full scans fetch volume per symbol automatically.
 
 ---
 
-### Volume spike (weekly watch signal)
+### Volume spike (weekly)
 
-**Requirement:** `combined_signal = watch` when price is near resistance (`mt_stage == WATCH`) **and** either:
-- `slope_4w_pct > 0` **and** `slope_4w_delta > 0` (rising slope), **or**
-- **Weekly volume spike:** current week volume **>** 20-week moving average of weekly volume
+**Requirement:** Weekly volume **>** 20-week moving average of weekly volume → `volume_spike: true`.
+
+Used in the **buy** rule only (not required for **watch**).
 
 **Fields:** `weekly_volume`, `volume_ma20`, `volume_spike` (bool) on each scan row.
 

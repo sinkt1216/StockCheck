@@ -37,7 +37,6 @@ weekly_trend:
   regression_weeks: 4
   ma_short: 10
   ma_long: 20
-  ma_medium: 50
 
 multi_top_breakout:
   lookback_years: 5

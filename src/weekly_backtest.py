@@ -66,6 +66,7 @@ def _row_to_buy_dict(row: pd.Series) -> dict[str, Any]:
         "slope_4w_pct": row.get("wt_slope_4w_pct"),
         "slope_1w_delta": row.get("wt_slope_1w_delta"),
         "slope_4w_delta": row.get("wt_slope_4w_delta"),
+        "early_turn": bool(row.get("wt_early_turn")),
         "volume_spike": bool(row.get("volume_spike")),
         "avg_volume_50d": row.get("avg_volume_50d"),
     }
@@ -121,22 +122,33 @@ def run_backtest(
     return enrich_backtest(merged, min_avg_volume_50d=0)
 
 
-def _build_buy_weeks_summary(df: pd.DataFrame, *, ccy: str) -> list[str]:
-    buys = df[df["combined_signal"] == "buy"]
-    if buys.empty:
-        return ["  (no buy signals in range — volume_spike required; avg_volume_50d not checked in backtest)"]
+def _build_signal_weeks_summary(
+    df: pd.DataFrame, *, ccy: str, signal: str, empty_msg: str
+) -> list[str]:
+    rows = df[df["combined_signal"] == signal]
+    if rows.empty:
+        return [f"  {empty_msg}"]
     lines: list[str] = []
-    for _, row in buys.iterrows():
+    for _, row in rows.iterrows():
         lines.append(
             f"  {row['week_start']}  close {ccy}{row['wt_close']:.2f}  "
             f"slp1w={_fmt_pct(row.get('wt_slope_1w_pct'), 6).strip()}  "
             f"slp4w={_fmt_pct(row.get('wt_slope_4w_pct'), 6).strip()}  "
+            f"d1w={_fmt_pct(row.get('wt_slope_1w_delta'), 6).strip()}  "
             f"d4w={_fmt_pct(row.get('wt_slope_4w_delta'), 6).strip()}  "
             f"10>20={_yn(row.get('wt_ma10_above_ma20'))}  "
-            f"10>50={_yn(row.get('wt_ma10_above_ma50'))}  "
             f"{'VOL_SPIKE' if row.get('volume_spike') else ''}"
         )
     return lines
+
+
+def _build_buy_weeks_summary(df: pd.DataFrame, *, ccy: str) -> list[str]:
+    return _build_signal_weeks_summary(
+        df,
+        ccy=ccy,
+        signal="buy",
+        empty_msg="(no buy signals in range — volume_spike required; avg_volume_50d not checked in backtest)",
+    )
 
 
 def summarize_backtest(symbol: str, df: pd.DataFrame) -> str:
@@ -146,9 +158,9 @@ def summarize_backtest(symbol: str, df: pd.DataFrame) -> str:
         "=" * 100,
         "",
         "Columns: slp1w/slp4w = weekly MA10 slope | d1w/d4w = week-over-week change",
-        "         MA = price_above_ma10_ma20 (buy rule) | 10>20/10>50 = MA10 vs MA20/MA50 (reference)",
+        "         MA = price_above_ma10_ma20 (buy rule) | 10>20 = MA10 vs MA20 (reference)",
         "         VolSpk = weekly volume > 20w MA",
-        "         Signal = buy when MA + slopes + acceleration + volume_spike (liquidity skipped here)",
+        "         Signal = watch (slope turn) | buy (MA stack + slopes + accel + volume_spike)",
         "Week column = Monday (week open). Bars use W-FRI close; --from/--to filter on Friday week-end.",
         "",
     ]
@@ -156,7 +168,7 @@ def summarize_backtest(symbol: str, df: pd.DataFrame) -> str:
     header = (
         f"{'Week Mon':<11} {'Close':>8} "
         f"{'slp1w':>7} {'slp4w':>7} {'d1w':>7} {'d4w':>7} {'MA':>3} "
-        f"{'10>20':>5} {'10>50':>5} {'VolSpk':>6} "
+        f"{'10>20':>5} {'VolSpk':>6} "
         f"{'Slope_ev':<20} {'Signal':<6}"
     )
     lines.extend([header, "-" * 100])
@@ -172,7 +184,6 @@ def summarize_backtest(symbol: str, df: pd.DataFrame) -> str:
             f"{_fmt_pct(row.get('wt_slope_4w_delta'), 7)} "
             f"{_yn(row.get('wt_price_above_ma10_ma20')):>3} "
             f"{_yn(row.get('wt_ma10_above_ma20')):>5} "
-            f"{_yn(row.get('wt_ma10_above_ma50')):>5} "
             f"{_yn(row.get('volume_spike')):>6} "
             f"{row['slope_event']:<20} "
             f"{signal:<6}"
@@ -180,6 +191,15 @@ def summarize_backtest(symbol: str, df: pd.DataFrame) -> str:
 
     lines.extend(["", "Buy signal weeks:", ""])
     lines.extend(_build_buy_weeks_summary(df, ccy=ccy))
+    lines.extend(["", "Watch signal weeks:", ""])
+    lines.extend(
+        _build_signal_weeks_summary(
+            df,
+            ccy=ccy,
+            signal="watch",
+            empty_msg="(no watch signals — need slp1w accelerating and slp4w turning)",
+        )
+    )
 
     event_rows = df[(df["slope_event"] != "") | df["combined_signal"].notna()]
     if not event_rows.empty:

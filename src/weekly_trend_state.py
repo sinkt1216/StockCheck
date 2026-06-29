@@ -26,7 +26,6 @@ DEFAULTS = {
     "regression_weeks": 4,
     "ma_short": 10,
     "ma_long": 20,
-    "ma_medium": 50,
 }
 
 
@@ -83,12 +82,10 @@ def compute_weekly_trend_series(
     reg_weeks = int(cfg["regression_weeks"])
     ma_short = int(cfg["ma_short"])
     ma_long = int(cfg["ma_long"])
-    ma_medium = int(cfg["ma_medium"])
 
     close = weekly["Close"].astype(float)
     ma10 = close.rolling(window=ma_short, min_periods=ma_short).mean()
     ma20 = close.rolling(window=ma_long, min_periods=ma_long).mean()
-    ma50 = close.rolling(window=ma_medium, min_periods=ma_medium).mean()
 
     prior_low_8 = close.rolling(window=8, min_periods=8).min().shift(1)
     prior_high_12 = close.rolling(window=12, min_periods=12).max().shift(1)
@@ -101,7 +98,6 @@ def compute_weekly_trend_series(
         c = float(close.iloc[i])
         m10 = float(ma10.iloc[i]) if not math.isnan(ma10.iloc[i]) else float("nan")
         m20 = float(ma20.iloc[i]) if not math.isnan(ma20.iloc[i]) else float("nan")
-        m50 = float(ma50.iloc[i]) if not math.isnan(ma50.iloc[i]) else float("nan")
 
         slope_4w = _slope_pct_per_week(ma10, reg_weeks, i)
         if i > 0 and not math.isnan(ma10.iloc[i]) and not math.isnan(ma10.iloc[i - 1]) and ma10.iloc[i - 1] != 0:
@@ -115,7 +111,6 @@ def compute_weekly_trend_series(
         breakout_12w = not math.isnan(ph12) and c > float(ph12)
         ma_stack = not any(math.isnan(v) for v in (c, m10, m20)) and c > m10 > m20
         ma10_above_ma20 = not any(math.isnan(v) for v in (m10, m20)) and m10 > m20
-        ma10_above_ma50 = not any(math.isnan(v) for v in (m10, m50)) and m10 > m50
 
         state = _assign_state(
             slope_4w,
@@ -139,13 +134,11 @@ def compute_weekly_trend_series(
                 "close": round(c, 2),
                 "ma10": round(m10, 2) if not math.isnan(m10) else None,
                 "ma20": round(m20, 2) if not math.isnan(m20) else None,
-                "ma50": round(m50, 2) if not math.isnan(m50) else None,
                 "slope_1w_pct": round(slope_1w, 2) if not math.isnan(slope_1w) else None,
                 "slope_4w_pct": round(slope_4w, 2) if not math.isnan(slope_4w) else None,
                 "higher_low": higher_low,
                 "price_above_ma10_ma20": ma_stack,
                 "ma10_above_ma20": ma10_above_ma20,
-                "ma10_above_ma50": ma10_above_ma50,
                 "breakout_12w": breakout_12w,
                 "early_turn": early_turn,
                 "confirmed_turn": confirmed_turn,
@@ -216,7 +209,6 @@ def main() -> int:
             f"slope_4w={str(row['slope_4w_pct']):>6}%  "
             f"ma={'Y' if row['price_above_ma10_ma20'] else 'N'}  "
             f"10>20={'Y' if row['ma10_above_ma20'] else 'N'}  "
-            f"10>50={'Y' if row['ma10_above_ma50'] else 'N'}  "
             f"{row['state']}{flag_str}"
         )
     return 0

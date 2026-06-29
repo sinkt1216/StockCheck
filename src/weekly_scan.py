@@ -57,11 +57,9 @@ def _normalize_row(row: dict[str, Any]) -> dict[str, Any]:
     out = dict(row)
     if "price_above_ma10_ma20" not in out:
         out["price_above_ma10_ma20"] = bool(out.get("ma_stack"))
-    ma10, ma20, ma50 = out.get("ma10"), out.get("ma20"), out.get("ma50")
+    ma10, ma20 = out.get("ma10"), out.get("ma20")
     if out.get("ma10_above_ma20") is None and ma10 is not None and ma20 is not None:
         out["ma10_above_ma20"] = ma10 > ma20
-    if out.get("ma10_above_ma50") is None and ma10 is not None and ma50 is not None:
-        out["ma10_above_ma50"] = ma10 > ma50
     return out
 
 
@@ -80,6 +78,25 @@ def _passes_volume(row: dict[str, Any], *, min_avg_volume_50d: int) -> bool:
     return vol is not None and vol > min_avg_volume_50d
 
 
+def _slp4w_turning(row: dict[str, Any]) -> bool:
+    """4-week MA10 slope improving or formal early_turn."""
+    if row.get("early_turn"):
+        return True
+    d4 = row.get("slope_4w_delta")
+    return d4 is not None and d4 > 0
+
+
+def _slp1w_accelerating(row: dict[str, Any]) -> bool:
+    """Weekly MA10 slope rising and steepening vs prior week."""
+    s1 = row.get("slope_1w_pct")
+    d1 = row.get("slope_1w_delta")
+    return s1 is not None and s1 > 0 and d1 is not None and d1 > 0
+
+
+def _passes_watch_rule(row: dict[str, Any]) -> bool:
+    return _slp4w_turning(row) and _slp1w_accelerating(row)
+
+
 def _passes_buy_rule(row: dict[str, Any], *, min_avg_volume_50d: int) -> bool:
     if not row.get("price_above_ma10_ma20"):
         return False
@@ -93,12 +110,20 @@ def _passes_buy_rule(row: dict[str, Any], *, min_avg_volume_50d: int) -> bool:
     return bool(row.get("volume_spike"))
 
 
-def _assign_buy_signal(row: dict[str, Any], *, min_avg_volume_50d: int) -> dict[str, Any]:
+def _assign_combined_signal(row: dict[str, Any], *, min_avg_volume_50d: int) -> dict[str, Any]:
     row = _normalize_row(row)
-    row["combined_signal"] = (
-        "buy" if _passes_buy_rule(row, min_avg_volume_50d=min_avg_volume_50d) else None
-    )
+    if _passes_buy_rule(row, min_avg_volume_50d=min_avg_volume_50d):
+        row["combined_signal"] = "buy"
+    elif _passes_watch_rule(row):
+        row["combined_signal"] = "watch"
+    else:
+        row["combined_signal"] = None
     return row
+
+
+def _assign_buy_signal(row: dict[str, Any], *, min_avg_volume_50d: int) -> dict[str, Any]:
+    """Alias for _assign_combined_signal (sets buy, watch, or null)."""
+    return _assign_combined_signal(row, min_avg_volume_50d=min_avg_volume_50d)
 
 
 def _is_hit(row: dict[str, Any], *, min_avg_volume_50d: int = 0) -> bool:
@@ -107,17 +132,25 @@ def _is_hit(row: dict[str, Any], *, min_avg_volume_50d: int = 0) -> bool:
 
 def _hit_filter_meta(*, min_avg_volume_50d: int) -> dict[str, Any]:
     return {
-        "combined_signal": "buy",
-        "price_above_ma10_ma20": True,
-        "slope_1w_positive": True,
-        "slope_4w_positive": True,
-        "slope_acceleration": "slope_4w_delta > 0 OR slope_1w_delta > 0",
-        "volume_spike": True,
-        "min_avg_volume_50d": min_avg_volume_50d,
+        "hits_file": "buy only",
+        "buy": {
+            "combined_signal": "buy",
+            "price_above_ma10_ma20": True,
+            "slope_1w_positive": True,
+            "slope_4w_positive": True,
+            "slope_acceleration": "slope_4w_delta > 0 OR slope_1w_delta > 0",
+            "volume_spike": True,
+            "min_avg_volume_50d": min_avg_volume_50d,
+        },
+        "watch": {
+            "combined_signal": "watch",
+            "slope_4w_turning": "early_turn OR slope_4w_delta > 0",
+            "slope_1w_accelerating": "slope_1w_pct > 0 AND slope_1w_delta > 0",
+            "note": "watch rows stay in full scan JSON only, not *_hits.json",
+        },
         "common_equity_universe": True,
         "reference_fields": {
-            "ma10_above_ma20": "weekly MA10 > MA20 (not required for buy)",
-            "ma10_above_ma50": "weekly MA10 > MA50 (not required for buy)",
+            "ma10_above_ma20": "weekly MA10 > MA20 (not required for buy or watch)",
         },
     }
 
@@ -164,7 +197,6 @@ def scan_symbol(symbol: str) -> dict[str, Any] | None:
         "close": trend.get("close"),
         "ma10": trend.get("ma10"),
         "ma20": trend.get("ma20"),
-        "ma50": trend.get("ma50"),
         "trend_state": trend.get("state"),
         "slope_1w_pct": slope_1w,
         "slope_4w_pct": slope_4w,
@@ -174,7 +206,6 @@ def scan_symbol(symbol: str) -> dict[str, Any] | None:
         "confirmed_turn": bool(trend.get("confirmed_turn")),
         "price_above_ma10_ma20": bool(trend.get("price_above_ma10_ma20")),
         "ma10_above_ma20": bool(trend.get("ma10_above_ma20")),
-        "ma10_above_ma50": bool(trend.get("ma10_above_ma50")),
         "avg_volume_50d": fetch_avg_volume_50d(symbol),
         "weekly_volume": vol_metrics["weekly_volume"],
         "volume_ma20": vol_metrics["volume_ma20"],
@@ -205,6 +236,8 @@ def refilter_scan(
     out["results"] = results
     out["hit_rows"] = hits
     out["hits"] = len(hits)
+    out["watch_rows"] = [r for r in results if r.get("combined_signal") == "watch"]
+    out["watches"] = len(out["watch_rows"])
     if allowed is not None:
         out["universe_count"] = len(allowed)
         out["scanned"] = len(results)
@@ -234,6 +267,8 @@ def enrich_scan_volume(
     out["results"] = results
     out["hit_rows"] = [r for r in results if _is_hit(r, min_avg_volume_50d=min_avg_volume_50d)]
     out["hits"] = len(out["hit_rows"])
+    out["watch_rows"] = [r for r in results if r.get("combined_signal") == "watch"]
+    out["watches"] = len(out["watch_rows"])
     return out
 
 
@@ -261,9 +296,8 @@ def enrich_scan_weekly_volume(
             trend = trend_df.iloc[-1].to_dict()
             updated["ma10"] = trend.get("ma10")
             updated["ma20"] = trend.get("ma20")
-            updated["ma50"] = trend.get("ma50")
             updated["ma10_above_ma20"] = bool(trend.get("ma10_above_ma20"))
-            updated["ma10_above_ma50"] = bool(trend.get("ma10_above_ma50"))
+            updated["early_turn"] = bool(trend.get("early_turn"))
         except RuntimeError:
             updated["weekly_volume"] = None
             updated["volume_ma20"] = None
@@ -274,6 +308,8 @@ def enrich_scan_weekly_volume(
     out["results"] = results
     out["hit_rows"] = [r for r in results if _is_hit(r, min_avg_volume_50d=min_avg_volume_50d)]
     out["hits"] = len(out["hit_rows"])
+    out["watch_rows"] = [r for r in results if r.get("combined_signal") == "watch"]
+    out["watches"] = len(out["watch_rows"])
     return out
 
 
@@ -324,12 +360,14 @@ def run_scan(symbols: list[str], *, progress: bool = True) -> dict[str, Any]:
         results.append(row)
 
     hits = [r for r in results if _is_hit(r, min_avg_volume_50d=min_avg_volume_50d)]
+    watches = [r for r in results if r.get("combined_signal") == "watch"]
     return {
         "generated_at": datetime.now(UTC).isoformat().replace("+00:00", "Z"),
         "universe_count": total,
         "scanned": len(results),
         "errors": len(errors),
         "hits": len(hits),
+        "watches": len(watches),
         "results": results,
         "hit_rows": hits,
         "error_rows": errors,
@@ -339,10 +377,10 @@ def run_scan(symbols: list[str], *, progress: bool = True) -> dict[str, Any]:
 def summarize_scan(payload: dict[str, Any]) -> str:
     lines = [
         f"Weekly scan — {payload['scanned']}/{payload['universe_count']} symbols",
-        f"Buy hits: {payload['hits']}  Errors: {payload['errors']}",
+        f"Buy hits: {payload['hits']}  Watch: {payload.get('watches', 0)}  Errors: {payload['errors']}",
         f"Week (Mon): {week_start_monday(payload['hit_rows'][0]['week_end']) if payload['hit_rows'] else 'n/a'}",
         "",
-        f"{'Symbol':<8} {'Close':>8} {'slp1w':>7} {'slp4w':>7} {'d4w':>7} {'10>20':>5} {'10>50':>5} {'Flags'}",
+        f"{'Symbol':<8} {'Close':>8} {'slp1w':>7} {'slp4w':>7} {'d4w':>7} {'10>20':>5} {'Flags'}",
         "-" * 78,
     ]
 
@@ -359,10 +397,9 @@ def summarize_scan(payload: dict[str, Any]) -> str:
         d4 = row.get("slope_4w_delta")
         d4_str = f"{d4:+.2f}%" if d4 is not None else "n/a"
         ma20 = "Y" if row.get("ma10_above_ma20") else "N"
-        ma50 = "Y" if row.get("ma10_above_ma50") else "N"
         lines.append(
             f"{row['symbol']:<8} ${row.get('close', 0):>7.2f} "
-            f"{s1_str:>7} {slope_str:>7} {d4_str:>7} {ma20:>5} {ma50:>5} "
+            f"{s1_str:>7} {slope_str:>7} {d4_str:>7} {ma20:>5} "
             f"{', '.join(flags)}"
         )
     return "\n".join(lines)
