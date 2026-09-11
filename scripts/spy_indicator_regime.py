@@ -1,17 +1,18 @@
-"""Standalone SPY regime analysis: MA slopes/spreads, MACD, RSI (no project trend state)."""
+"""Standalone weekly regime analysis: MA slopes/spreads, MACD, RSI (no project trend state)."""
 
 from __future__ import annotations
 
 import argparse
 import math
-import sys
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
 import numpy as np
 import pandas as pd
 import yfinance as yf
 
+DEFAULT_SYMBOL = "SPY"
 DEFAULT_START = "2018-01-22"
 DEFAULT_END = "2020-04-20"
 MA_PERIODS = (10, 20, 50)
@@ -151,6 +152,8 @@ def find_first_cross(df: pd.DataFrame, col: str, direction: str, after: str, bef
         hits = sub[sub[col] > 0]
     elif direction == "rsi_below_50":
         hits = sub[sub["rsi"] < 50]
+    elif direction == "rsi_below_40":
+        hits = sub[sub["rsi"] < 40]
     elif direction == "rsi_above_50":
         hits = sub[sub["rsi"] > 50]
     elif direction == "macd_cross_down":
@@ -174,6 +177,7 @@ def analyze_episode(df: pd.DataFrame, ep: Episode) -> dict[str, Any]:
     window = df.loc[win_start:win_end]
 
     recovery = df.loc[ep.trough_week : (pd.Timestamp(ep.trough_week) + pd.Timedelta(weeks=16)).strftime("%Y-%m-%d")]
+    rec_end = recovery.index[-1].strftime("%Y-%m-%d") if not recovery.empty else ep.trough_week
 
     return {
         "name": ep.name,
@@ -187,26 +191,25 @@ def analyze_episode(df: pd.DataFrame, ep: Episode) -> dict[str, Any]:
         "first_slope50_neg": find_first_cross(df, "slope50w", "below_zero", win_start, ep.trough_week),
         "first_rsi_below_50": find_first_cross(df, "rsi", "rsi_below_50", win_start, ep.trough_week),
         "first_rsi_below_40": find_first_cross(
-            df, "rsi", "rsi_below_50", win_start, ep.trough_week
+            df, "rsi", "rsi_below_40", win_start, ep.trough_week
         ),
         "first_macd_cross_down": find_first_cross(df, "macd", "macd_cross_down", win_start, ep.trough_week),
         "trough_rsi": float(trough["rsi"]) if not math.isnan(trough["rsi"]) else None,
-        "recovery_rsi_above_50": find_first_cross(recovery, "rsi", "rsi_above_50", ep.trough_week, recovery.index[-1].strftime("%Y-%m-%d")),
-        "recovery_macd_cross_up": find_first_cross(recovery, "macd", "macd_cross_up", ep.trough_week, recovery.index[-1].strftime("%Y-%m-%d")),
-        "recovery_slope10_pos": find_first_cross(recovery, "slope10w", "above_zero", ep.trough_week, recovery.index[-1].strftime("%Y-%m-%d")),
-        "recovery_spread_10_20_pos": find_first_cross(recovery, "spread_10_20_pct", "above_zero", ep.trough_week, recovery.index[-1].strftime("%Y-%m-%d")),
+        "recovery_rsi_above_50": find_first_cross(recovery, "rsi", "rsi_above_50", ep.trough_week, rec_end),
+        "recovery_macd_cross_up": find_first_cross(recovery, "macd", "macd_cross_up", ep.trough_week, rec_end),
+        "recovery_slope10_pos": find_first_cross(recovery, "slope10w", "above_zero", ep.trough_week, rec_end),
+        "recovery_spread_10_20_pos": find_first_cross(recovery, "spread_10_20_pct", "above_zero", ep.trough_week, rec_end),
         "window": window,
     }
 
 
-def _weeks_from_peak_trough(
-    full_df: pd.DataFrame, peak_week: str, trough_week: str, signal_date: str | None
-) -> str:
+def _weeks_from_peak(peak_week: str, signal_date: str | None) -> str:
     if not signal_date:
         return "n/a"
-    peak_ts = pd.Timestamp(peak_week)
-    sig_ts = pd.Timestamp(signal_date)
-    return f"{(sig_ts - peak_ts).days // 7}w after peak"
+    days = (pd.Timestamp(signal_date) - pd.Timestamp(peak_week)).days
+    if days < 0:
+        return f"{-days // 7}w before peak"
+    return f"{days // 7}w after peak"
 
 
 def _weeks_from_trough_recovery(trough_week: str, signal_date: str | None) -> str:
@@ -217,8 +220,13 @@ def _weeks_from_trough_recovery(trough_week: str, signal_date: str | None) -> st
     return f"{(sig_ts - trough_ts).days // 7}w after trough"
 
 
+def default_out_path(symbol: str, start: str, end: str) -> Path:
+    return Path("data/backtests") / f"{symbol.upper()}_indicator_regime_{start}_{end}.txt"
+
+
 def main() -> None:
-    parser = argparse.ArgumentParser(description="SPY weekly MA/MACD/RSI regime analysis")
+    parser = argparse.ArgumentParser(description="Weekly MA/MACD/RSI regime analysis")
+    parser.add_argument("--symbol", default=DEFAULT_SYMBOL)
     parser.add_argument("--from", dest="start", default=DEFAULT_START)
     parser.add_argument("--to", dest="end", default=DEFAULT_END)
     parser.add_argument(
@@ -227,33 +235,51 @@ def main() -> None:
         default="2018-2020",
         help="Episode set for signal timing analysis",
     )
+    parser.add_argument(
+        "--out",
+        default=None,
+        help="Output file (default: data/backtests/{SYMBOL}_indicator_regime_{from}_{to}.txt)",
+    )
+    parser.add_argument("--no-save", action="store_true", help="Print only, do not write a file")
     args = parser.parse_args()
     episodes = EPISODES_2007_2009 if args.period == "2007-2009" else EPISODES_2018_2020
+    symbol = args.symbol.upper()
 
-    daily = fetch_daily("SPY", start=args.start, end=args.end)
+    daily = fetch_daily(symbol, start=args.start, end=args.end)
     weekly = to_weekly(daily)
     full_df = enrich_weekly(weekly)
     df = full_df.loc[args.start : args.end]
 
-    print("SPY indicator regime analysis (weekly bars, W-FRI close)")
-    print(f"Period: {args.start} to {args.end}")
-    print(f"MA slopes: {SLOPE_WEEKS}-week linear regression, normalized as %/week")
-    print(f"MA spreads: (short-long)/long * 100")
-    print(f"RSI({RSI_PERIOD}), MACD({MACD_FAST}/{MACD_SLOW}/{MACD_SIGNAL}) on weekly close")
-    print("=" * 100)
+    range_start, range_end = pd.Timestamp(args.start), pd.Timestamp(args.end)
+    covered = [ep for ep in episodes if range_start <= pd.Timestamp(ep.peak_week) <= range_end]
+    skipped = [ep.name for ep in episodes if ep not in covered]
+    episodes = covered
 
-    print("\nFULL WEEKLY TABLE")
-    print("-" * 100)
+    lines: list[str] = []
+
+    def emit(s: str = "") -> None:
+        print(s)
+        lines.append(s)
+
+    emit(f"{symbol} indicator regime analysis (weekly bars, W-FRI close)")
+    emit(f"Period: {args.start} to {args.end}")
+    emit(f"MA slopes: {SLOPE_WEEKS}-week linear regression, normalized as %/week")
+    emit("MA spreads: (short-long)/long * 100")
+    emit(f"RSI({RSI_PERIOD}), MACD({MACD_FAST}/{MACD_SLOW}/{MACD_SIGNAL}) on weekly close")
+    emit("=" * 100)
+
+    emit("\nFULL WEEKLY TABLE")
+    emit("-" * 100)
     hdr = (
         f"{'Week':<11} {'Close':>8} "
         f"{'slp10':>7} {'slp20':>7} {'slp50':>7} "
         f"{'10-20':>7} {'20-50':>7} {'10-50':>7} "
         f"{'RSI':>5} {'MACD':>7} {'Sig':>7} {'Hist':>7} {'dd26w':>7}"
     )
-    print(hdr)
-    print("-" * 100)
+    emit(hdr)
+    emit("-" * 100)
     for _, row in df.iterrows():
-        print(
+        emit(
             f"{row['week']:<11} "
             f"${row['Close']:>7.2f} "
             f"{fmt(row['slope10w'], 7)} {fmt(row['slope20w'], 7)} {fmt(row['slope50w'], 7)} "
@@ -263,9 +289,11 @@ def main() -> None:
             f"{row['close_dd_26w_pct']:>6.1f}%"
         )
 
-    print("\n" + "=" * 100)
-    print("EPISODE ANALYSIS")
-    print("=" * 100)
+    emit("\n" + "=" * 100)
+    emit("EPISODE ANALYSIS")
+    emit("=" * 100)
+    if skipped:
+        emit(f"Outside the requested range, not analyzed: {', '.join(skipped)}")
 
     start_signals = [
         ("slope10 < 0", "first_slope10_neg"),
@@ -274,22 +302,23 @@ def main() -> None:
         ("spread 10-20 < 0", "first_spread_10_20_neg"),
         ("spread 20-50 < 0", "first_spread_20_50_neg"),
         ("RSI < 50", "first_rsi_below_50"),
+        ("RSI < 40", "first_rsi_below_40"),
         ("MACD < signal", "first_macd_cross_down"),
     ]
 
     for ep in episodes:
         a = analyze_episode(full_df, ep)
-        print(f"\n### {a['name']} (drawdown ~{a['drawdown']:.1f}%)")
-        print(f"  Peak:   {a['peak']}")
-        print(f"  Trough: {a['trough']}")
-        print("  START signals (first occurrence peak -> trough):")
+        emit(f"\n### {a['name']} (drawdown ~{a['drawdown']:.1f}%)")
+        emit(f"  Peak:   {a['peak']}")
+        emit(f"  Trough: {a['trough']}")
+        emit("  START signals (first occurrence within 8w before peak -> trough):")
         for label, key in start_signals:
             dt = a[key]
-            timing = _weeks_from_peak_trough(full_df, ep.peak_week, ep.trough_week, dt)
-            print(f"    {label + ':':<22} {dt or 'None':<12} ({timing})")
+            timing = _weeks_from_peak(ep.peak_week, dt)
+            emit(f"    {label + ':':<22} {dt or 'None':<12} ({timing})")
         if a["trough_rsi"]:
-            print(f"    RSI at trough:        {a['trough_rsi']:.1f}")
-        print("  END / recovery signals (trough -> +16 weeks):")
+            emit(f"    RSI at trough:        {a['trough_rsi']:.1f}")
+        emit("  END / recovery signals (trough -> +16 weeks):")
         recovery_signals = [
             ("RSI > 50", "recovery_rsi_above_50"),
             ("MACD > signal", "recovery_macd_cross_up"),
@@ -299,21 +328,27 @@ def main() -> None:
         for label, key in recovery_signals:
             dt = a[key]
             timing = _weeks_from_trough_recovery(ep.trough_week, dt)
-            print(f"    {label + ':':<22} {dt or 'None':<12} ({timing})")
+            emit(f"    {label + ':':<22} {dt or 'None':<12} ({timing})")
 
-    print("\n" + "=" * 100)
-    print("SENSITIVITY RANKING (earliest START signal per episode)")
-    print("=" * 100)
+    emit("\n" + "=" * 100)
+    emit("SENSITIVITY RANKING (earliest START signal per episode)")
+    emit("=" * 100)
     for ep in episodes:
         a = analyze_episode(full_df, ep)
         ranked = []
         for label, key in start_signals:
             dt = a[key]
             if dt:
-                ranked.append((pd.Timestamp(dt), label, _weeks_from_peak_trough(full_df, ep.peak_week, ep.trough_week, dt)))
+                ranked.append((pd.Timestamp(dt), label, _weeks_from_peak(ep.peak_week, dt)))
         ranked.sort()
         order = " -> ".join(f"{lbl} ({wk})" for _, lbl, wk in ranked) if ranked else "(no signals)"
-        print(f"  {ep.name}: {order}")
+        emit(f"  {ep.name}: {order}")
+
+    if not args.no_save:
+        out_path = Path(args.out) if args.out else default_out_path(symbol, args.start, args.end)
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        out_path.write_text("\n".join(lines), encoding="utf-8")
+        print(f"\nWrote {out_path}")
 
 
 if __name__ == "__main__":
