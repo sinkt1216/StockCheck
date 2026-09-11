@@ -217,13 +217,16 @@ def analyze_episode_breadth(breadth: pd.DataFrame, ep: Episode) -> dict:
 def weeks_after_peak(peak: str, signal: str | None) -> str:
     if not signal:
         return "n/a"
-    return f"{(pd.Timestamp(signal) - pd.Timestamp(peak)).days // 7}w"
+    days = (pd.Timestamp(signal) - pd.Timestamp(peak)).days
+    if days < 0:
+        return f"{-days // 7}w before peak"
+    return f"{days // 7}w after peak"
 
 
 def weeks_after_trough(trough: str, signal: str | None) -> str:
     if not signal:
         return "n/a"
-    return f"{(pd.Timestamp(signal) - pd.Timestamp(trough)).days // 7}w"
+    return f"{(pd.Timestamp(signal) - pd.Timestamp(trough)).days // 7}w after trough"
 
 
 def main() -> None:
@@ -291,7 +294,7 @@ def main() -> None:
         emit(f"\n### {a['name']}")
         emit(f"  Peak ({ep.peak_week}):   {breadth_snapshot(a['peak'])}")
         emit(f"  Trough ({ep.trough_week}): {breadth_snapshot(a['trough'])}")
-        emit("  START breadth signals (peak -> trough):")
+        emit("  START breadth signals (first occurrence within 8w before peak -> trough):")
         for label, key in start_signals:
             dt = a[key]
             emit(f"    {label + ':':<24} {dt or 'None':<12} ({weeks_after_peak(ep.peak_week, dt)})")
