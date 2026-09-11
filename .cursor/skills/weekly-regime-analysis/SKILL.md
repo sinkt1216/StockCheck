@@ -21,7 +21,7 @@ python scripts/spy_indicator_regime.py --from YYYY-MM-DD --to YYYY-MM-DD [--symb
 
 - `--symbol` defaults to **SPY**; any yfinance ticker works.
 - Output is written to `data/backtests/{SYMBOL}_indicator_regime_{from}_{to}.txt` automatically. Override with `--out PATH`, or pass `--no-save` to print only.
-- `--period` selects preset episode definitions for timing tables; add new presets in the script when validating new eras.
+- `--period` selects preset episode definitions for timing tables; add new presets in the script when validating new eras. Preset episodes whose peak falls outside `--from`/`--to` are listed as skipped rather than analyzed, so narrow ranges report only the episodes they actually cover.
 
 Always **run the script** for the user's date range; do not guess indicator values.
 

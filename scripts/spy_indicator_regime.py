@@ -177,6 +177,7 @@ def analyze_episode(df: pd.DataFrame, ep: Episode) -> dict[str, Any]:
     window = df.loc[win_start:win_end]
 
     recovery = df.loc[ep.trough_week : (pd.Timestamp(ep.trough_week) + pd.Timedelta(weeks=16)).strftime("%Y-%m-%d")]
+    rec_end = recovery.index[-1].strftime("%Y-%m-%d") if not recovery.empty else ep.trough_week
 
     return {
         "name": ep.name,
@@ -194,10 +195,10 @@ def analyze_episode(df: pd.DataFrame, ep: Episode) -> dict[str, Any]:
         ),
         "first_macd_cross_down": find_first_cross(df, "macd", "macd_cross_down", win_start, ep.trough_week),
         "trough_rsi": float(trough["rsi"]) if not math.isnan(trough["rsi"]) else None,
-        "recovery_rsi_above_50": find_first_cross(recovery, "rsi", "rsi_above_50", ep.trough_week, recovery.index[-1].strftime("%Y-%m-%d")),
-        "recovery_macd_cross_up": find_first_cross(recovery, "macd", "macd_cross_up", ep.trough_week, recovery.index[-1].strftime("%Y-%m-%d")),
-        "recovery_slope10_pos": find_first_cross(recovery, "slope10w", "above_zero", ep.trough_week, recovery.index[-1].strftime("%Y-%m-%d")),
-        "recovery_spread_10_20_pos": find_first_cross(recovery, "spread_10_20_pct", "above_zero", ep.trough_week, recovery.index[-1].strftime("%Y-%m-%d")),
+        "recovery_rsi_above_50": find_first_cross(recovery, "rsi", "rsi_above_50", ep.trough_week, rec_end),
+        "recovery_macd_cross_up": find_first_cross(recovery, "macd", "macd_cross_up", ep.trough_week, rec_end),
+        "recovery_slope10_pos": find_first_cross(recovery, "slope10w", "above_zero", ep.trough_week, rec_end),
+        "recovery_spread_10_20_pos": find_first_cross(recovery, "spread_10_20_pct", "above_zero", ep.trough_week, rec_end),
         "window": window,
     }
 
@@ -249,6 +250,11 @@ def main() -> None:
     full_df = enrich_weekly(weekly)
     df = full_df.loc[args.start : args.end]
 
+    range_start, range_end = pd.Timestamp(args.start), pd.Timestamp(args.end)
+    covered = [ep for ep in episodes if range_start <= pd.Timestamp(ep.peak_week) <= range_end]
+    skipped = [ep.name for ep in episodes if ep not in covered]
+    episodes = covered
+
     lines: list[str] = []
 
     def emit(s: str = "") -> None:
@@ -286,6 +292,8 @@ def main() -> None:
     emit("\n" + "=" * 100)
     emit("EPISODE ANALYSIS")
     emit("=" * 100)
+    if skipped:
+        emit(f"Outside the requested range, not analyzed: {', '.join(skipped)}")
 
     start_signals = [
         ("slope10 < 0", "first_slope10_neg"),
