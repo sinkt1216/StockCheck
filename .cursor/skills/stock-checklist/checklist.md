@@ -202,7 +202,13 @@ Demonstrates why 1-week slope alone misleads: Jan had high 1w/4w slopes (mature)
 
 **Related code:** `src/trend_analysis.py` — daily DeanFi-style extension/z-score for any symbol (different timeframe and purpose).
 
-**Next step:** Implement `src/weekly_trend_state.py` + `config/sources.yaml` section (`weekly_trend`: thresholds, universe); cache under `data/trends/weekly/`. Support `--symbol`, `--as-of`, and `--scan` with state-change alerts only.
+**Next step:** ~~Implement the state machine~~ Done — `src/weekly_trend_state.py`, thresholds in `config/sources.yaml` → `weekly_trend`. Computed on demand from yfinance (no cache). Run:
+
+```bash
+python src/weekly_trend_state.py SYMBOL [--from YYYY-MM-DD] [--to YYYY-MM-DD]
+```
+
+Scanning a whole universe goes through `src/weekly_scan.py`, which reuses this module.
 
 ---
 
@@ -232,10 +238,10 @@ Demonstrates why 1-week slope alone misleads: Jan had high 1w/4w slopes (mature)
 | Step | Rule |
 |------|------|
 | Weekly bars | Adjusted OHLC, resample `W-FRI` (week-ending Friday) |
-| Lookback | Default **3 years** (~156 weeks); tunable 2–5 years for backtest |
+| Lookback | Default **5 years** (~260 weeks); tunable for backtest |
 | Swing high | Week `t` is a swing high if `high[t]` > max(`high[t-1..t-N]`, `high[t+1..t+N]`); default `N = 3` |
-| Touch cluster | Group swing highs within **±2.5%** of each other (`touch_tolerance_pct`) |
-| Valid resistance | Cluster has **≥ 3 touches** (`min_touches`), span **≥ 52 weeks** (`min_span_weeks`) between first and last touch |
+| Touch cluster | Group swing highs within **±18%** of each other (`touch_tolerance_pct`) |
+| Valid resistance | Cluster has **≥ 3 touches** (`min_touches`), span **≥ 26 weeks** (`min_span_weeks`) between first and last touch |
 | Resistance level | **Max** touch in cluster (conservative ceiling) — alternative: median (document if changed) |
 | Base quality (optional) | ≥ 60% of lookback weeks closed **below** resistance; last touch ≥ 8 weeks before eval week |
 | Breakout | **Weekly close** > `resistance × (1 + breakout_buffer_pct)`; default buffer **1.0%** (not intraday wick) |
@@ -247,11 +253,11 @@ Demonstrates why 1-week slope alone misleads: Jan had high 1w/4w slopes (mature)
 
 | Parameter | Default | Notes |
 |-----------|---------|-------|
-| `lookback_years` | 3 | Extend to 5 for very long bases (MU-style) |
+| `lookback_years` | 5 | Long enough for MU-style multi-year bases |
 | `swing_lookback_weeks` | 3 | Local peak definition |
-| `touch_tolerance_pct` | 2.5 | Same “top” band |
+| `touch_tolerance_pct` | 18.0 | Same “top” band — wide, so ragged multi-year tops cluster into one level |
 | `min_touches` | 3 | Double/triple top minimum |
-| `min_span_weeks` | 52 | Tops must span ≥ 1 year |
+| `min_span_weeks` | 26 | Tops must span ≥ half a year |
 | `breakout_buffer_pct` | 1.0 | Reduce false breaks |
 | `breakout_freshness_weeks` | 8 | “Just broke” window |
 | `hold_weeks` | 1 | Consecutive closes above |
@@ -299,9 +305,15 @@ Optional tighten: require `ma_stack` within 2 weeks of break. Optional loosen: `
 
 **Validation:** Pending — user will provide **ticker** and **timeframe** to backtest both this indicator and weekly MA slope on the same bars.
 
-**Related code:** `src/weekly_trend_state.py` (planned); `src/multi_top_breakout.py` (planned).
+**Related code:** `src/weekly_trend_state.py`, `src/multi_top_breakout.py`.
 
-**Next step:** Implement `src/multi_top_breakout.py` + `config/sources.yaml` section (`multi_top_breakout`: thresholds); cache under `data/breakouts/multi_top/`. CLI: `--symbol`, `--as-of`, `--lookback-years`. Then backtest vs user-supplied ticker/timeframe alongside weekly trend state.
+**Next step:** ~~Implement the detector~~ Done — `src/multi_top_breakout.py`, thresholds in `config/sources.yaml` → `multi_top_breakout`. Computed on demand from yfinance (no cache). Run:
+
+```bash
+python src/multi_top_breakout.py SYMBOL [--from YYYY-MM-DD] [--to YYYY-MM-DD]
+```
+
+Remaining: backtest against a user-supplied ticker/timeframe alongside weekly trend state.
 
 ---
 
@@ -415,7 +427,7 @@ Used in the **buy** rule only (not required for **watch**).
 | **Decisions & research** | `checklist.md` (this file) | Which source, why, field mapping | DeanFi chosen for SPX A/D |
 | **Agent workflow** | `SKILL.md` | How to explore items — not project-specific data | Per-item report template |
 | **Runtime config** | `config/sources.yaml` (when code exists) | URLs, refresh interval, cache path | `breadth.url`, `refresh_minutes: 15` |
-| **Live / cached data** | `data/breadth/`, `data/meanreversion/`, `data/correlation/`, `data/trends/weekly/`, `data/breakouts/multi_top/`, `data/universe/`, `data/scans/` | Fetched JSON snapshots | `daily_breadth.json`, `cor1m.json`, `nyse.json`, `YYYY-MM-DD_hits.json` |
+| **Live / cached data** | `data/breadth/`, `data/meanreversion/`, `data/correlation/`, `data/universe/`, `data/scans/`, `data/backtests/` | Fetched JSON snapshots and run outputs | `daily_breadth.json`, `cor1m.json`, `nyse.json`, `YYYY-MM-DD_hits.json` |
 | **Application code** | `src/` fetcher modules | Fetch, validate, expose metrics | `build_universe.py`, `weekly_scan.py`, `weekly_trend_state.py`, `multi_top_breakout.py`, `market_breadth.py`, `mean_reversion.py`, `implied_correlation.py`, `trend_analysis.py` |
 
 Do **not** store daily metric values (e.g. today's `advances: 394`) in checklist or skill files — those belong in `data/` or a database once the fetcher runs.
