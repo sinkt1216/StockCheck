@@ -52,6 +52,41 @@ Hist bottoms → MACD bull cross → slope10 > 0 → RSI > 50 → spread 10-20 >
 | RSI at trough | > 45 | < 35 |
 | Hist at trough | > −1 | < −2 (or long negative then inflects) |
 
+## Breadth confirmation (S&P 500, weekly)
+
+From `scripts/breadth_regime_analysis.py` over the same two eras. **Caveat:** breadth is computed from today's constituent list, so pre-2010 levels are survivorship-biased and read too healthy — use the *timing* and the *relative* collapse, not the absolute percentages.
+
+| Episode | Peak %>MA20 | Trough %>MA20 | Trough %>MA10 | Trough H/L (new lows) |
+|---------|-------------|---------------|---------------|------------------------|
+| Feb 2018 correction | 86% | 41% | 16% | 0.09 (44) |
+| Q4 2018 bear | 76% | 12% | 6% | 0.00 (208) |
+| May 2019 pullback | 86% | 48% | 30% | 1.02 (44) |
+| COVID | 77% | 2% | 2% | 0.01 (377) |
+| Aug 2007 flare | 62% | 30% | 27% | 0.87 (23) |
+| Oct07–Mar08 | 76% | 18% | 29% | 0.09 (110) |
+| Nov 2008 low | 47%\* | 2% | 4% | 0.00 (261) |
+| Mar 2009 low | — | 10% | 6% | 0.01 (236) |
+
+\*Aug 2008 "peak" already sat below 50% — a local peak inside a bear, matching the indicator script showing every signal already bearish there.
+
+**Breadth confirms, it does not lead.** `% above MA20 < 50` fires the *same week* as the RSI < 50 / MACD bear cross in both clean cases (Q4 2018: all three on 2018-10-12, 3w after peak; COVID: all three on 2020-02-28, 2w after peak). Breadth adds depth, not earliness.
+
+### Depth discriminator at the trough
+
+| | Shallow dip | Confirmed bear |
+|--|-------------|----------------|
+| % above MA20 | > 40% | < 20% |
+| % above MA10 | can still collapse (16–30%) | < 10% |
+| New 52w lows | double digits (~40) | hundreds (208–377) |
+
+The **MA10-vs-MA20 split** is the tell for a shallow dip: Feb 2018 and May 2019 both crushed short-term breadth (16%, 30% above MA10) while MA20 breadth held above 40%. In real bears both collapse together. Aug 2007 sat in between (30% / 27%) — a genuine warning that preceded the October top by months.
+
+**H/L ratio alone is noisy**: Feb 2018 hit 0.09 at its trough, as bearish as Oct07–Mar08, yet it was a 2-week dip. The raw new-low *count* separates them (44 vs 110+).
+
+### Breadth recovery timing
+
+Shallow dips repair breadth almost immediately (`% > MA20` back above 50 within 0–1w of the trough); real bears take ~3–5w, and the worst legs do not repair inside 16 weeks (Nov 2008, and COVID as of 2020-04-20). Same ordering as the momentum-then-structure recovery cascade above.
+
 ## Multi-year bear caveats
 
 1. Early warnings can precede the **absolute** high by months.

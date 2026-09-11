@@ -16,14 +16,28 @@ Standalone weekly-bar regime study: **MA slopes**, **MA spreads**, **MACD**, **R
 ## Run the analysis
 
 ```bash
-python scripts/spy_indicator_regime.py --from YYYY-MM-DD --to YYYY-MM-DD [--period 2018-2020|2007-2009]
+python scripts/spy_indicator_regime.py --from YYYY-MM-DD --to YYYY-MM-DD [--symbol SPY] [--period 2018-2020|2007-2009]
 ```
 
-- Default symbol: **SPY** (extend script if user needs another ticker).
-- Save output: `data/backtests/{SYMBOL}_indicator_regime_{from}_{to}.txt`
+- `--symbol` defaults to **SPY**; any yfinance ticker works.
+- Output is written to `data/backtests/{SYMBOL}_indicator_regime_{from}_{to}.txt` automatically. Override with `--out PATH`, or pass `--no-save` to print only.
 - `--period` selects preset episode definitions for timing tables; add new presets in the script when validating new eras.
 
 Always **run the script** for the user's date range; do not guess indicator values.
+
+### Breadth companion
+
+```bash
+python scripts/breadth_regime_analysis.py --from YYYY-MM-DD --to YYYY-MM-DD [--period 2018-2020|2007-2009] --out PATH
+```
+
+Computes S&P 500 weekly breadth from yfinance: 52-week high/low counts (within 1% of the rolling extreme), the high/low ratio, and % of constituents above weekly MA10 / MA20 / both. Same episode presets, so breadth timings line up with the indicator timings above.
+
+- `--out` is optional here and has **no** default; pass it to keep the run.
+- Uses **today's** S&P 500 constituent list, so older eras carry survivorship bias — breadth levels read too healthy for 2007–2009. Treat the numbers as relative timing, not absolute participation.
+- Downloads ~500 symbols, so a full run takes several minutes.
+
+Use breadth to answer *how many stocks confirm the index move*; use the indicator script for *the index's own trend and momentum*.
 
 ## Indicator definitions (weekly W-FRI close)
 
@@ -87,7 +101,7 @@ In long bears, **local rally peaks** may show no fresh warnings (all indicators 
 3. Identify drawdown episodes in range (user may name peaks/troughs; otherwise use dd26w local extremes).
 4. For each episode, report:
    - Peak / trough week with key indicator values
-   - **START** signals with **weeks after peak**
+   - **START** signals with **weeks after peak** — the search window opens 8 weeks before the peak, so a signal can legitimately read **`Nw before peak`** (early warning, or a local peak already inside a bear)
    - **RECOVERY** signals with **weeks after trough**
    - Sensitivity order for that episode
 5. Compare to checklists above; note shallow vs confirmed bear.
@@ -132,4 +146,5 @@ In long bears, **local rally peaks** may show no fresh warnings (all indicators 
 ## Additional resources
 
 - Validated cross-era patterns: [patterns.md](patterns.md)
-- Script: [scripts/spy_indicator_regime.py](../../../scripts/spy_indicator_regime.py)
+- Indicator script: [scripts/spy_indicator_regime.py](../../../scripts/spy_indicator_regime.py)
+- Breadth script: [scripts/breadth_regime_analysis.py](../../../scripts/breadth_regime_analysis.py)
