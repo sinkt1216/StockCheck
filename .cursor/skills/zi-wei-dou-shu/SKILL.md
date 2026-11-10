@@ -1,14 +1,14 @@
 ---
-name: ziwei-chart-analysis
+name: zi-wei-dou-shu
 description: >-
-  紫微斗數命盤分析（Zi Wei Dou Shu chart reading）。先給整體運程，再以十二宮逐一立太極點，
+  紫微斗數（Zi Wei Dou Shu）命盤分析。先給整體運程，再以十二宮逐一立太極點，
   分析生年／大限／流年／小限四化的化入、化出、自化與匯合，並用飛星「宮位轉換」（例如疾厄宮
   是官祿宮的田宅宮）推論對其他宮的影響。Use when the user shares a 紫微斗數 / ziwei chart
   screenshot (文墨天機, 紫微斗數 apps) or asks about 流年、大限、流月、四化、自化、飛星、
   立極、宮位轉換、置業／婚姻／事業／健康應期.
 ---
 
-# 紫微斗數命盤分析
+# 紫微斗數
 
 固定三段式輸出：**整體運程 → 十二宮立極四化分析 → 飛星宮位轉換**。查表資料（四化、五虎遁、祿存羊陀、魁鉞、昌曲、天馬、斗君、宮位轉換矩陣）在 [reference.md](reference.md)。
 
