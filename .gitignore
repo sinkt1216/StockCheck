@@ -6,3 +6,8 @@ venv/
 .env
 data/
 _*.py
+
+# 紫微斗數命主檔案含個人出生資料，只提交範本
+.cursor/skills/zi-wei-dou-shu/profiles/*
+!.cursor/skills/zi-wei-dou-shu/profiles/_template.json
+!.cursor/skills/zi-wei-dou-shu/profiles/_template.md
