@@ -1,0 +1,12 @@
+{
+  "name": "範例",
+  "gender": "女",
+  "birth_year": 2000,
+  "lunar_month": 1,
+  "lunar_day": 1,
+  "hour": "子",
+  "ziwei": null,
+  "geng_ke": "太陰",
+  "extra_stars": {},
+  "overrides": {}
+}
